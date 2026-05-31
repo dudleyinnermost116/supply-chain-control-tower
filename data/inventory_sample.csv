@@ -1,0 +1,16 @@
+item_no,item_description,warehouse_id,warehouse_name,qty_on_hand,qty_allocated,qty_available,reorder_point,safety_stock,backorder_flag,supplier_id,expected_receipt_date
+ITEM-001,Surgical Gloves Box 100,WH-01,Main Warehouse,500,480,20,100,50,N,SUP-001,
+ITEM-002,IV Bags 1L Pack 10,WH-01,Main Warehouse,50,80,0,75,30,Y,SUP-002,5/20/2026
+ITEM-003,Paracetamol 500mg x100,WH-01,Main Warehouse,200,150,50,80,40,N,SUP-001,
+ITEM-004,Blood Pressure Monitor,WH-01,Main Warehouse,30,30,0,20,10,Y,SUP-003,5/22/2026
+ITEM-005,Insulin Pen Needles x100,WH-02,Cold Storage,150,120,30,60,25,N,SUP-002,
+ITEM-006,Sterile Bandages Pack 20,WH-01,Main Warehouse,400,200,200,100,50,N,SUP-001,
+ITEM-007,Oxygen Mask Adult,WH-01,Main Warehouse,80,85,0,40,20,Y,SUP-004,5/19/2026
+ITEM-008,Disposable Syringes x50,WH-02,Cold Storage,300,280,20,100,50,N,SUP-002,
+ITEM-009,Saline Solution 500ml,WH-01,Main Warehouse,120,120,0,60,30,Y,SUP-003,5/21/2026
+ITEM-010,Nitrile Gloves Box 100,WH-01,Main Warehouse,600,300,300,150,75,N,SUP-001,
+ITEM-011,Wound Dressing Large,WH-02,Cold Storage,45,50,0,30,15,Y,SUP-004,5/23/2026
+ITEM-012,Alcohol Swabs x200,WH-01,Main Warehouse,800,400,400,200,100,N,SUP-001,
+ITEM-013,Thermometer Digital,WH-01,Main Warehouse,60,60,0,25,10,Y,SUP-003,5/20/2026
+ITEM-014,Catheter Kit,WH-02,Cold Storage,25,20,5,15,8,N,SUP-004,
+ITEM-015,Medical Tape Roll,WH-01,Main Warehouse,350,180,170,100,50,N,SUP-001,

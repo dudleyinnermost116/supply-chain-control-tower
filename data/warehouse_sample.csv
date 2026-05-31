@@ -1,0 +1,11 @@
+pick_id,sales_order_no,warehouse_id,warehouse_name,item_no,qty_to_pick,qty_picked,pick_status,pick_priority,assigned_picker,pick_start_time,pick_complete_time,scheduled_pick_date,pick_delay_reason,equipment_issue,staffing_flag,zone,pick_notes
+WP-2001,SO-1001,WH-01,Main Warehouse,ITEM-001,50,50,COMPLETE,NORMAL,John S,2026-05-10 08:15,2026-05-10 09:45,2026-05-10,,,NO,A,Completed on time
+WP-2002,SO-1002,WH-01,Main Warehouse,ITEM-002,30,0,NOT_STARTED,HIGH,,,,2026-05-08,NO_STAFF_AVAILABLE,,YES,B,No picker assigned — short staffed
+WP-2003,SO-1003,WH-02,Cold Storage,ITEM-003,20,0,NOT_STARTED,URGENT,,,,2026-05-05,SYSTEM_ERROR,NO,YES,C,WMS system down — pick list not generated
+WP-2004,SO-1004,WH-01,Main Warehouse,ITEM-004,75,75,COMPLETE,NORMAL,Maria L,2026-05-12 07:30,2026-05-12 10:00,2026-05-12,,,NO,A,Completed on time
+WP-2005,SO-1005,WH-02,Cold Storage,ITEM-005,100,45,IN_PROGRESS,HIGH,Dave K,2026-05-07 13:00,,2026-05-07,EQUIPMENT_BREAKDOWN,YES,NO,B,Forklift breakdown mid-pick — partial completion
+WP-2006,SO-1006,WH-01,Main Warehouse,ITEM-006,15,0,BLOCKED,URGENT,,,,2026-05-09,FREIGHT_HOLD_BLOCK,NO,NO,C,Pick blocked — freight hold on order
+WP-2007,SO-1007,WH-02,Cold Storage,ITEM-007,60,60,COMPLETE,NORMAL,Sarah M,2026-05-06 09:00,2026-05-06 11:30,2026-05-06,,,NO,A,Completed — slight carrier delay after pickup
+WP-2008,SO-1008,WH-01,Main Warehouse,ITEM-008,25,0,READY,NORMAL,Tom B,,,2026-05-13,,,NO,B,Pick list ready — awaiting start
+WP-2009,SO-1009,WH-02,Cold Storage,ITEM-009,40,0,NOT_STARTED,URGENT,,,,2026-05-04,NO_STAFF_AVAILABLE,,YES,C,Night shift no-show — pick not started
+WP-2010,SO-1010,WH-01,Main Warehouse,ITEM-010,35,35,COMPLETE,NORMAL,John S,2026-05-11 08:00,2026-05-11 09:30,2026-05-11,,,NO,A,Completed on time

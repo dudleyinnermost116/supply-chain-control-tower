@@ -1,0 +1,51 @@
+# config/settings.example.yaml
+# ================================================================
+# HOW TO USE THIS FILE:
+#   1. Copy this file and name the copy: settings.yaml
+#      (in the same config\ folder)
+#   2. Update the database path to match your machine
+#   3. Do not commit settings.yaml to Git — it is in .gitignore
+#
+# On Windows use double backslashes: C:\\Users\\YourName\\...
+# On Mac/Linux use forward slashes:  /home/yourname/...
+# ================================================================
+
+database:
+  # Full path to your SQLite database file.
+  # The setup script creates this file automatically.
+  path: "C:\\Users\\YourName\\Documents\\supply-chain-control-tower\\data\\supply_chain.db"
+
+# ── DELAY THRESHOLDS ─────────────────────────────────────────────
+# Controls when orders change from DELAYED to NEED_ACTION status.
+# Default: orders overdue by more than 5 days become NEED_ACTION.
+thresholds:
+  need_action_days: 5
+  delayed_days: 1
+
+# ── HOOKS (background scheduler) ─────────────────────────────────
+# Set enabled: false to disable a hook without deleting it.
+# Times are in UTC. India (IST) = UTC+5:30, so 8am IST = 2:30am UTC.
+hooks:
+  morning_briefing:
+    enabled: true
+    hour: 2
+    minute: 30
+
+  ci_scan:
+    enabled: true
+    interval_minutes: 60
+
+  need_action_monitor:
+    enabled: true
+    interval_minutes: 30
+
+  agent_health_check:
+    enabled: true
+    interval_hours: 6
+
+# ── CI AGENT SETTINGS ────────────────────────────────────────────
+ci_agent:
+  # Minimum confidence score for a recommendation to be shown (0.0 to 1.0)
+  min_confidence: 0.5
+  # How many days of history the CI agent analyses per scan
+  lookback_days: 30

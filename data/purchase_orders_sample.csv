@@ -1,0 +1,16 @@
+po_number,po_line,item_no,item_description,supplier_id,supplier_name,warehouse_id,qty_ordered,qty_received,qty_outstanding,unit_cost,po_status,order_date,expected_receipt_date,actual_receipt_date,notes
+PO-3001,1,ITEM-001,Widget A - Standard,SUP-01,Apex Supply Co,WH-01,200,0,200,12.5,OPEN,4/20/2026,5/10/2026,,Routine replenishment order
+PO-3002,1,ITEM-002,Widget B - Heavy Duty,SUP-02,Blue Ridge Distributors,WH-01,150,0,150,24.75,OPEN,4/25/2026,5/8/2026,,Urgent below safety stock
+PO-3003,1,ITEM-003,Gadget X - Premium,SUP-01,Apex Supply Co,WH-02,100,0,100,45,OPEN,4/18/2026,5/2/2026,,Supplier confirmed delay
+PO-3004,1,ITEM-004,Gadget Y - Economy,SUP-03,Summit Parts Ltd,WH-01,300,300,0,8.25,RECEIVED,4/1/2026,4/28/2026,4/27/2026,Received one day early
+PO-3005,1,ITEM-005,Component Z - Bulk,SUP-02,Blue Ridge Distributors,WH-02,500,0,500,3.1,OPEN,4/22/2026,5/14/2026,,Standard bulk order
+PO-3006,1,ITEM-006,Assembly Kit - Full,SUP-04,Delta Industrial,WH-01,75,0,75,88,OPEN,4/15/2026,4/30/2026,,Supplier has not confirmed ship date
+PO-3007,1,ITEM-007,Part AA - Replacement,SUP-03,Summit Parts Ltd,WH-02,120,60,60,15.5,PARTIAL,4/10/2026,4/25/2026,4/25/2026,Partial receipt - remainder expected next week
+PO-3008,1,ITEM-008,Part BB - OEM,SUP-05,Pinnacle Goods Inc,WH-01,80,0,80,32,OPEN,4/28/2026,5/18/2026,,New supplier first order
+PO-3009,1,ITEM-009,Module CC - Sensor,SUP-01,Apex Supply Co,WH-02,60,0,60,67.5,CANCELLED,4/5/2026,4/20/2026,,Cancelled - item discontinued
+PO-3010,1,ITEM-010,Module DD - Relay,SUP-04,Delta Industrial,WH-01,90,0,90,41,OPEN,4/12/2026,5/1/2026,,Delayed - supplier production issue
+PO-3011,1,ITEM-002,Widget B - Heavy Duty,SUP-02,Blue Ridge Distributors,WH-01,100,0,100,24.75,OPEN,5/1/2026,5/22/2026,,Follow-on order placed due to ongoing demand
+PO-3012,1,ITEM-011,Frame Unit - Steel,SUP-05,Pinnacle Goods Inc,WH-01,200,0,200,19,OPEN,4/17/2026,5/5/2026,,Overdue - carrier picked up but no update
+PO-3013,1,ITEM-012,Cover Panel - Plastic,SUP-03,Summit Parts Ltd,WH-02,350,350,0,5.75,RECEIVED,3/28/2026,4/15/2026,4/16/2026,One day late but accepted
+PO-3014,1,ITEM-013,Bracket Set - Zinc,SUP-01,Apex Supply Co,WH-01,180,0,180,9.9,OPEN,4/30/2026,5/25/2026,,Standard lead time order
+PO-3015,1,ITEM-001,Widget A - Standard,SUP-01,Apex Supply Co,WH-02,100,0,100,12.5,OPEN,5/5/2026,5/28/2026,,Secondary warehouse replenishment

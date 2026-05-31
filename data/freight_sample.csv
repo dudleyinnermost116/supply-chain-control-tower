@@ -1,0 +1,11 @@
+freight_id,sales_order_no,carrier_id,carrier_name,pickup_scheduled_date,pickup_actual_date,delivery_scheduled_date,delivery_actual_date,freight_status,freight_hold_flag,freight_hold_reason,carrier_performance_score,truck_available,driver_assigned,trailer_no,origin_warehouse,destination,freight_notes
+FR-1001,SO-1001,CAR-01,FastFreight LLC,2026-05-10,2026-05-10,2026-05-14,2026-05-14,DELIVERED,NO,,92,YES,YES,TRL-441,WH-01,Chicago IL,On time delivery
+FR-1002,SO-1002,CAR-02,Blue Arrow Transport,2026-05-08,,2026-05-12,,PICKUP_MISSED,NO,,65,NO,NO,,WH-01,Dallas TX,Carrier did not show — no driver assigned
+FR-1003,SO-1003,CAR-01,FastFreight LLC,2026-05-05,,2026-05-09,,ON_HOLD,YES,PAYMENT_DISPUTE,92,YES,YES,TRL-442,WH-02,Atlanta GA,Finance dispute blocking release
+FR-1004,SO-1004,CAR-03,Summit Logistics,2026-05-12,2026-05-12,2026-05-16,,IN_TRANSIT,NO,,88,YES,YES,TRL-211,WH-01,Miami FL,En route — on schedule
+FR-1005,SO-1005,CAR-02,Blue Arrow Transport,2026-05-07,,2026-05-11,,CARRIER_DELAYED,NO,,65,YES,NO,,WH-02,Seattle WA,Carrier confirmed 3 day delay — weather related
+FR-1006,SO-1006,CAR-04,Pinnacle Carriers,2026-05-09,,2026-05-13,,ON_HOLD,YES,DOCUMENTATION_MISSING,78,YES,YES,TRL-339,WH-01,Boston MA,BOL not signed — shipment blocked
+FR-1007,SO-1007,CAR-03,Summit Logistics,2026-05-06,2026-05-06,2026-05-10,2026-05-11,DELIVERED,NO,,88,YES,YES,TRL-212,WH-02,Phoenix AZ,Delivered one day late
+FR-1008,SO-1008,CAR-01,FastFreight LLC,2026-05-13,,2026-05-17,,SCHEDULED,NO,,92,YES,YES,TRL-443,WH-01,Denver CO,Pickup scheduled for today
+FR-1009,SO-1009,CAR-05,Delta Haul Co,2026-05-04,,2026-05-08,,ON_HOLD,YES,COMPLIANCE_ISSUE,55,NO,NO,,WH-02,Portland OR,Carrier compliance flag — audit required
+FR-1010,SO-1010,CAR-04,Pinnacle Carriers,2026-05-11,2026-05-11,2026-05-15,,IN_TRANSIT,NO,,78,YES,YES,TRL-340,WH-01,Nashville TN,In transit — expected on time

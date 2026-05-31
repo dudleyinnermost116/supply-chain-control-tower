@@ -1,0 +1,41 @@
+# requirements.txt
+# Supply Chain Control Tower — Python Dependencies
+# ================================================================
+# HOW TO USE:
+#   Run this command once after cloning the repository:
+#   pip install -r requirements.txt
+#
+# This installs every package the project needs in one step.
+# ================================================================
+
+# ── MCP Framework ────────────────────────────────────────────────
+# The core library that turns Python functions into Claude Desktop tools.
+# FastMCP is included inside the mcp package.
+mcp
+
+# ── Scheduler ────────────────────────────────────────────────────
+# Powers the background scheduler in scripts/scheduler.py.
+# Handles cron-style timing and interval-based hooks.
+apscheduler
+
+# ── Settings ─────────────────────────────────────────────────────
+# Reads config/settings.yaml — the central settings file.
+# Used by every MCP server via config/settings_loader.py.
+pyyaml
+
+# ── Dashboard ────────────────────────────────────────────────────
+# Streamlit powers the visual dashboard in dashboard/app.py.
+# Plotly provides the interactive charts inside the dashboard.
+streamlit
+plotly
+
+# ── Standard Library (no install needed) ─────────────────────────
+# These are built into Python 3.10 — do NOT pip install them:
+#   sqlite3   — database access
+#   csv       — CSV file reading (legacy, pre-Phase 7)
+#   json      — memory file reading/writing
+#   datetime  — date calculations
+#   os        — file path handling
+#   sys       — Python path manipulation
+#   logging   — scheduler log output
+#   pathlib   — cross-platform path handling

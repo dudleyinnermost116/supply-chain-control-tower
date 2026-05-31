@@ -1,0 +1,105 @@
+# .gitignore
+# Supply Chain Control Tower
+# ================================================================
+# Files listed here are NEVER committed to GitHub.
+# This protects your private data, credentials, and
+# machine-specific configuration from being published.
+# ================================================================
+
+
+# ── YOUR REAL DATA ───────────────────────────────────────────────
+# The SQLite database contains your operational data.
+# It must never be committed — it stays on your machine only.
+data/supply_chain.db
+data/*.db
+
+# If you create your own CSV exports from real data, exclude them too.
+# The sample CSV files (shipments_sample.csv etc.) ARE committed
+# because they contain only fictional test data.
+data/*_real.csv
+data/my_*.csv
+
+
+# ── MACHINE-SPECIFIC CONFIGURATION ───────────────────────────────
+# settings.yaml contains your database path which is specific
+# to your machine. New users create their own from settings.example.yaml
+config/settings.yaml
+
+# Claude Desktop config contains your exact Windows paths.
+# Never commit this — new users create their own.
+claude_desktop_config.json
+**/claude_desktop_config.json
+
+
+# ── PROJECT MEMORY ────────────────────────────────────────────────
+# Memory file contains session history and decisions that are
+# personal to your installation. Not useful for other users.
+memory/project_memory.json
+
+
+# ── LOG FILES ─────────────────────────────────────────────────────
+# Scheduler logs are generated at runtime — not source code.
+logs/
+*.log
+
+
+# ── PYTHON CACHE ──────────────────────────────────────────────────
+# Python creates these automatically when running code.
+# They are not source code and vary by machine.
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+
+# ── VIRTUAL ENVIRONMENTS ──────────────────────────────────────────
+# If you use a virtual environment, exclude its folder.
+# Other users create their own virtual environment.
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+
+# ── IDE AND EDITOR FILES ──────────────────────────────────────────
+# These are personal editor settings — not project files.
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+
+# ── ENVIRONMENT VARIABLES ─────────────────────────────────────────
+# If you ever add API keys or secrets, they go in .env
+# and must never be committed.
+.env
+.env.local
+.env.*.local
+secrets.yaml
+secrets.json
+
+
+# ── STREAMLIT CACHE ───────────────────────────────────────────────
+# Streamlit creates a cache folder at runtime.
+.streamlit/
+
+
+# ── TEST AND TEMP FILES ───────────────────────────────────────────
+*.tmp
+*.temp
+temp/
+tmp/
+scratch/
+
+
+# ── DISTRIBUTION AND BUILD ────────────────────────────────────────
+# If you ever package this project, exclude build artifacts.
+dist/
+build/
+*.egg-info/
