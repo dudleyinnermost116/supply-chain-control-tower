@@ -1,27 +1,48 @@
 # mcp_server/recommendation_mcp_server.py
 #
+# Owner: Vishal
 # Recommendation Agent — Phase 6 of the Supply Chain Control Tower.
-# Turns root cause findings into a prioritised, team-assigned action plan.
 #
-# Phase 7 update: now reads from SQLite instead of CSV.
+# Builds on Phase 5 (Investigation Agent) by turning root cause findings
+# into a prioritised, team-assigned action plan.
+#
+# Answers the question:
+#   "Given everything that is wrong today, what should my team do,
+#    in what order, and who is responsible for each item?"
+#
+# This agent loads data from all four tables (same as investigation agent)
+# and runs the full investigation logic internally before scoring.
+#
+# Tools in this server:
+#   get_action_plan              — full prioritised work queue for today
+#   get_team_workload            — actions grouped by responsible team
+#   get_escalation_list          — orders that need manager attention now
+#   get_recommendation_for_order — single order priority + action
+#
+# SECURITY FIXES ADDED (Phase 10):
+#   - sanitise_input on get_recommendation_for_order which accepts sales_order_no
+#   - shield_row / shield_rows on all return values containing database text
+#   - sys.path fix so imports work regardless of Claude Desktop launch location
+#   - get_database_path() replaces all four hardcoded file paths
+
+import sys
+import os
+
+# PHASE 10 CHANGE: sys.path fix
+# Ensures Python can find supply_chain and config modules
+# regardless of where Claude Desktop launches the server from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import date
 from mcp.server.fastmcp import FastMCP
 
-# OLD: individual CSV loaders
-# from supply_chain.data_loader import load_shipments
-# from supply_chain.inventory_data_loader import load_inventory
-# from supply_chain.freight_data_loader import load_freight
-# from supply_chain.warehouse_data_loader import load_warehouse_picks
-#
-# NEW (Phase 7): single SQLite database loader
-from supply_chain.db_loader import (
-    load_shipments_db       as load_shipments,
-    load_inventory_db       as load_inventory,
-    load_freight_db         as load_freight,
-    load_warehouse_picks_db as load_warehouse_picks,
-)
+# ── Data loaders ──────────────────────────────────────────────────────────────
+from supply_chain.data_loader import load_shipments
+from supply_chain.inventory_data_loader import load_inventory
+from supply_chain.freight_data_loader import load_freight
+from supply_chain.warehouse_data_loader import load_warehouse_picks
 
+# ── Rules engines ─────────────────────────────────────────────────────────────
 from supply_chain.rules import (
     assign_delay_status,
     assign_reason_code,
@@ -30,68 +51,39 @@ from supply_chain.rules import (
 from supply_chain.inventory_rules import assign_inventory_status
 from supply_chain.freight_rules import assign_freight_status, assign_carrier_tier
 from supply_chain.warehouse_rules import assign_pick_health
+
+# ── Investigation logic (Phase 5) ─────────────────────────────────────────────
 from supply_chain.investigation_rules import (
     build_investigation_report,
     resolve_root_cause,
     score_severity,
 )
+
+# ── Recommendation logic (Phase 6) ────────────────────────────────────────────
 from supply_chain.recommendation_engine import build_action_record
+
+# SECURITY FIX:
+# sanitise_input — validates string inputs before use
+# shield_row     — scans a single result dict for injection text
+# shield_rows    — scans a list of result dicts for injection text
+from supply_chain.input_validation import sanitise_input
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
+
+# PHASE 10 CHANGE: Central Settings
+# get_database_path() reads from config/settings.yaml
+# Replaces all four hardcoded file path lines
+from config.settings_loader import get_database_path
+DB_FILE = get_database_path()
 
 mcp = FastMCP("recommendation-agent")
 
 TODAY = date.today()
 
-# OLD: four separate CSV file paths
-# SHIPMENTS_FILE = r"...\shipments_sample.csv"  etc.
-#
-# NEW (Phase 7): one SQLite database
-# DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 10 CHANGE: replaced relative sys.path with absolute path
-# The old line used os.path.join with relative parts which could fail
-# when Claude Desktop launches the server from an unknown working directory.
-# os.path.abspath(__file__) always gives the true location of this file
-# regardless of where Python was launched from.
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from config.settings_loader import get_database_path
-DB_FILE = get_database_path()
 
 # ─── SHARED HELPER: index rows by a key field ────────────────────────────────
 
 def _index_by(rows: list, key: str) -> dict:
-    """Returns a dict mapping key -> first matching row."""
+    """Returns a dict mapping key -> first matching row. Same as investigation agent."""
     result = {}
     for row in rows:
         k = str(row.get(key, "")).strip()
@@ -107,20 +99,24 @@ def _build_record_for_row(ship_row: dict, inventory_index: dict,
     """
     Runs the full investigation + recommendation pipeline for one shipment row.
     Returns a complete action record dict ready for any of the four tools.
-    """
-    sales_order_no  = str(ship_row.get("sales_order_no", "")).strip()
-    item_no         = str(ship_row.get("item_no", "")).strip()
 
-    # Shipping signals
+    This helper is called by every tool in this server.
+    It gathers signals from all four agents, resolves root cause,
+    scores severity, and builds the final prioritised action record.
+    """
+    sales_order_no = str(ship_row.get("sales_order_no", "")).strip()
+    item_no        = str(ship_row.get("item_no", "")).strip()
+
+    # ── Shipping signals ──────────────────────────────────────────────────────
     delay_status    = assign_delay_status(ship_row, TODAY)
     delay_days      = calculate_delay_days(ship_row, TODAY)
     shipping_reason = assign_reason_code(ship_row, TODAY)
 
-    # Inventory signals
+    # ── Inventory signals ─────────────────────────────────────────────────────
     inv_row          = inventory_index.get(item_no, {})
     inventory_status = assign_inventory_status(inv_row) if inv_row else "UNKNOWN"
 
-    # Freight signals
+    # ── Freight signals ───────────────────────────────────────────────────────
     frt_row             = freight_index.get(sales_order_no, {})
     freight_status      = assign_freight_status(frt_row, TODAY) if frt_row else "UNKNOWN"
     freight_hold        = str(frt_row.get("freight_hold_flag", "NO")).strip().upper() == "YES" if frt_row else False
@@ -128,11 +124,11 @@ def _build_record_for_row(ship_row: dict, inventory_index: dict,
     carrier_name        = frt_row.get("carrier_name", "Unknown") if frt_row else "Unknown"
     carrier_tier        = assign_carrier_tier(frt_row.get("carrier_performance_score", "")) if frt_row else "UNKNOWN"
 
-    # Warehouse signals
+    # ── Warehouse signals ─────────────────────────────────────────────────────
     wh_row      = warehouse_index.get(sales_order_no, {})
     pick_health = assign_pick_health(wh_row, TODAY) if wh_row else "UNKNOWN"
 
-    # Phase 5: resolve root cause and severity
+    # ── Phase 5: resolve root cause and severity ──────────────────────────────
     root_cause = resolve_root_cause(
         shipping_reason, freight_status, inventory_status, pick_health
     )
@@ -140,7 +136,9 @@ def _build_record_for_row(ship_row: dict, inventory_index: dict,
         delay_days, freight_hold, inventory_status, pick_health
     )
 
-    # Phase 6: build the scored action record
+    # ── Phase 6: build the scored action record ───────────────────────────────
+    # build_action_record returns a dict with priority_score, responsible_team,
+    # recommended_action, escalate flag, and escalation_reason
     return build_action_record(
         sales_order_no      = sales_order_no,
         customer_name       = ship_row.get("customer_name", ""),
@@ -154,12 +152,17 @@ def _build_record_for_row(ship_row: dict, inventory_index: dict,
     )
 
 
-# ─── SHARED HELPER: load all four tables and build indexes ───────────────────
+# ─── SHARED HELPER: load all four data sources and build indexes ──────────────
 
 def _load_all():
-    """Loads all four tables from SQLite and returns rows + indexes."""
-    # OLD: load_shipments(SHIPMENTS_FILE), etc.
-    # NEW (Phase 7): all from single DB_FILE
+    """
+    Loads all four data sources and returns rows + lookup indexes.
+    Called at the start of every tool in this server.
+
+    Why one function for all four: every tool needs all four sources.
+    Centralising this means if we add a fifth data source, we update
+    one function instead of four tools.
+    """
     ship_rows = load_shipments(DB_FILE)
     inv_rows  = load_inventory(DB_FILE)
     frt_rows  = load_freight(DB_FILE)
@@ -173,6 +176,10 @@ def _load_all():
 
 
 # ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST — each record contains customer_name (database text)
+#     and recommended_action (text string) → shield_rows on return
 
 @mcp.tool()
 def get_action_plan() -> list:
@@ -205,6 +212,7 @@ def get_action_plan() -> list:
     for ship_row in ship_rows:
         delay_status = assign_delay_status(ship_row, TODAY)
 
+        # Skip shipped and cancelled — nothing to action
         if delay_status in ("SHIPPED", "CANCELLED"):
             continue
 
@@ -212,17 +220,28 @@ def get_action_plan() -> list:
             ship_row, inventory_index, freight_index, warehouse_index
         )
 
+        # Only include orders that actually have a problem
         if record["priority_score"] > 0:
             results.append(record)
 
     if not results:
         return [{"message": "No delayed or at-risk orders found. All orders are on track."}]
 
+    # Highest priority score first
     results.sort(key=lambda x: x["priority_score"], reverse=True)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # customer_name is raw database text
+    # recommended_action and escalation_reason are text strings
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict containing team_buckets — lists of action records
+#     with customer_name (database text) → shield_row on the final return
 
 @mcp.tool()
 def get_team_workload() -> dict:
@@ -247,6 +266,7 @@ def get_team_workload() -> dict:
     """
     ship_rows, inventory_index, freight_index, warehouse_index = _load_all()
 
+    # team_name -> list of action records for that team
     team_buckets = {}
 
     for ship_row in ship_rows:
@@ -270,18 +290,29 @@ def get_team_workload() -> dict:
     if not team_buckets:
         return {"message": "No actions required. All orders are on track."}
 
+    # Sort each team's orders by priority score descending
     for team in team_buckets:
         team_buckets[team].sort(key=lambda x: x["priority_score"], reverse=True)
 
-    summary = {team: len(orders) for team, orders in team_buckets.items()}
+    # Summary count so the user can see team workload at a glance
+    summary = {
+        team: len(orders)
+        for team, orders in team_buckets.items()
+    }
 
-    return {
+    # SECURITY FIX: shield_row applied to the full result dict
+    # team_buckets contains records with customer_name (database text)
+    # REPLACES the old direct return statement
+    return shield_row({
         "team_summary": summary,
         "workload_by_team": team_buckets,
-    }
+    })
 
 
 # ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST of escalated action records with customer_name → shield_rows
 
 @mcp.tool()
 def get_escalation_list() -> list:
@@ -320,6 +351,8 @@ def get_escalation_list() -> list:
             ship_row, inventory_index, freight_index, warehouse_index
         )
 
+        # escalate is a boolean set by needs_escalation() in recommendation_engine.py
+        # True when: priority_score >= 70 OR delay_status == NEED_ACTION OR freight_hold active
         if record["escalate"]:
             results.append(record)
 
@@ -327,10 +360,17 @@ def get_escalation_list() -> list:
         return [{"message": "No orders require escalation at this time. All delays are within normal thresholds."}]
 
     results.sort(key=lambda x: x["priority_score"], reverse=True)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # customer_name is raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (sales_order_no) → sanitise_input at TOP
+#   - Returns a single action record dict with customer_name → shield_row on return
 
 @mcp.tool()
 def get_recommendation_for_order(sales_order_no: str) -> dict:
@@ -357,6 +397,11 @@ def get_recommendation_for_order(sales_order_no: str) -> dict:
     - "Does SO-1003 need escalation?"
     - "What is the next step for this order?"
     """
+    # SECURITY FIX: validate sales_order_no before loading any data
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
     ship_rows, inventory_index, freight_index, warehouse_index = _load_all()
 
     for ship_row in ship_rows:
@@ -364,7 +409,10 @@ def get_recommendation_for_order(sales_order_no: str) -> dict:
             record = _build_record_for_row(
                 ship_row, inventory_index, freight_index, warehouse_index
             )
-            return record
+            # SECURITY FIX: shield_row wraps the action record dict
+            # customer_name is raw database text
+            # REPLACES the old line: return record
+            return shield_row(record)
 
     return {"error": f"Sales order {sales_order_no} was not found."}
 

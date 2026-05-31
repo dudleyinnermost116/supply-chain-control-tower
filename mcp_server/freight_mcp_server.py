@@ -1,17 +1,35 @@
 # mcp_server/freight_mcp_server.py
 #
+# Owner: Vishal
 # Freight Agent — Phase 4 of the Supply Chain Control Tower.
 # Tracks carrier performance, freight holds, and pickup status.
 #
-# Phase 7 update: now reads from SQLite instead of CSV.
+# Answers the question: "Why hasn't the carrier picked this up?"
+#
+# Works alongside:
+#   shipping_mcp_server.py  — outbound delay status
+#   warehouse_mcp_server.py — internal pick operations
+#   inventory_mcp_server.py — stock availability
+#   po_mcp_server.py        — inbound supplier orders
+#
+# SECURITY FIXES ADDED (Phase 10):
+#   - sanitise_input on all tools that accept string parameters
+#   - shield_row / shield_rows on all return values containing database text
+#   - sys.path fix so imports work regardless of Claude Desktop launch location
+#   - get_database_path() replaces hardcoded DATA_FILE path
+
+import sys
+import os
+
+# PHASE 10 CHANGE: sys.path fix
+# Ensures Python can find the supply_chain and config modules
+# regardless of where Claude Desktop launches the server from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import date
 from mcp.server.fastmcp import FastMCP
 
-# OLD: from supply_chain.freight_data_loader import load_freight
-# NEW (Phase 7): reads from SQLite database
-from supply_chain.db_loader import load_freight_db as load_freight
-
+from supply_chain.freight_data_loader import load_freight
 from supply_chain.freight_rules import (
     assign_freight_status,
     assign_carrier_tier,
@@ -20,58 +38,29 @@ from supply_chain.freight_rules import (
     get_hold_severity,
 )
 
-mcp = FastMCP("freight-agent")
+# SECURITY FIX:
+# sanitise_input — validates string inputs before use
+# shield_row     — scans a single result dict for injection text
+# shield_rows    — scans a list of result dicts for injection text
+from supply_chain.input_validation import sanitise_input
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
 
-# OLD: DATA_FILE = r"...\freight_sample.csv"
-# NEW (Phase 7): single SQLite database
-# DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\..."
-# ...
-# ─────────────────────────────────────────────────────────────────────────────
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# PHASE 10 CHANGE: Central Settings
+# Replaces the old hardcoded line:
+#   DATA_FILE = r"C:\Users\preet\...\data\freight_sample.csv"
 from config.settings_loader import get_database_path
 DB_FILE = get_database_path()
+
+mcp = FastMCP("freight-agent")
 
 TODAY = date.today()
 
 
 # ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (sales_order_no) → sanitise_input at TOP
+#   - Returns a single dict with text fields like carrier_name,
+#     freight_hold_reason, recommendation → shield_row on return
 
 @mcp.tool()
 def get_freight_status_by_order(sales_order_no: str) -> dict:
@@ -91,8 +80,12 @@ def get_freight_status_by_order(sales_order_no: str) -> dict:
     - "Why hasn't SO-1002 been picked up yet?"
     - "What is the carrier doing on order SO-1005?"
     """
-    # OLD: rows = load_freight(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate sales_order_no before doing anything
+    # max_length=20 — real order numbers like "SO-1003" are 7 chars
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
     rows = load_freight(DB_FILE)
 
     for row in rows:
@@ -101,7 +94,11 @@ def get_freight_status_by_order(sales_order_no: str) -> dict:
             delay_days = calculate_pickup_delay_days(row, TODAY)
             carrier_tier = assign_carrier_tier(row.get("carrier_performance_score", ""))
 
-            return {
+            # SECURITY FIX: shield_row wraps the result dict
+            # carrier_name, freight_hold_reason, destination are database text
+            # recommendation is a generated string but shield_row is a safe layer
+            # REPLACES the old direct return statement
+            return shield_row({
                 "freight_id": row.get("freight_id", ""),
                 "sales_order_no": row.get("sales_order_no", ""),
                 "carrier_name": row.get("carrier_name", ""),
@@ -123,12 +120,16 @@ def get_freight_status_by_order(sales_order_no: str) -> dict:
                     row.get("carrier_name", ""),
                     delay_days,
                 ),
-            }
+            })
 
     return {"error": f"No freight record found for order: {sales_order_no}"}
 
 
 # ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields like carrier_name,
+#     freight_hold_reason, destination → shield_rows on return
 
 @mcp.tool()
 def get_freight_holds() -> list:
@@ -146,8 +147,6 @@ def get_freight_holds() -> list:
     - "List all freight hold orders"
     - "What is causing the freight holds today?"
     """
-    # OLD: rows = load_freight(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_freight(DB_FILE)
     results = []
 
@@ -177,12 +176,20 @@ def get_freight_holds() -> list:
     if not results:
         return [{"message": "No freight holds currently active. All shipments are clear."}]
 
+    # Sort: HIGH severity first, then by delay days descending
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "NONE": 3}
     results.sort(key=lambda x: (severity_order.get(x["hold_severity"], 9), -x["pickup_delay_days"]))
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # carrier_name, freight_hold_reason, destination are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields → shield_rows on return
 
 @mcp.tool()
 def get_missed_pickups() -> list:
@@ -199,8 +206,6 @@ def get_missed_pickups() -> list:
     - "Which shipments are sitting in the warehouse waiting for a carrier?"
     - "Show me carrier no-shows"
     """
-    # OLD: rows = load_freight(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_freight(DB_FILE)
     results = []
 
@@ -231,10 +236,17 @@ def get_missed_pickups() -> list:
         return [{"message": "No missed pickups found. All carriers have collected their shipments."}]
 
     results.sort(key=lambda x: x["pickup_delay_days"], reverse=True)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # carrier_name, destination, driver_assigned are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST — carrier_name comes from the database → shield_rows on return
 
 @mcp.tool()
 def get_carrier_performance_summary() -> list:
@@ -258,8 +270,6 @@ def get_carrier_performance_summary() -> list:
     - "Show me carrier scores"
     - "Who is our best and worst carrier?"
     """
-    # OLD: rows = load_freight(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_freight(DB_FILE)
 
     carrier_data = {}
@@ -301,6 +311,7 @@ def get_carrier_performance_summary() -> list:
 
     results = list(carrier_data.values())
 
+    # Sort worst performers first (lowest score)
     def score_sort(c):
         try:
             return int(str(c["performance_score"]).strip())
@@ -308,10 +319,18 @@ def get_carrier_performance_summary() -> list:
             return 999
 
     results.sort(key=score_sort)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # carrier_name comes from raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 5 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields like carrier_name,
+#     freight_hold_reason, destination → shield_rows on return
 
 @mcp.tool()
 def get_active_freight() -> list:
@@ -329,8 +348,6 @@ def get_active_freight() -> list:
     - "Give me a freight overview"
     - "Show me all in-transit and problem shipments"
     """
-    # OLD: rows = load_freight(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_freight(DB_FILE)
     results = []
 
@@ -366,7 +383,11 @@ def get_active_freight() -> list:
         return [{"message": "All freight has been delivered. No active shipments."}]
 
     results.sort(key=lambda x: (status_priority.get(x["freight_status"], 9), -x["pickup_delay_days"]))
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # carrier_name, freight_hold_reason, destination are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 if __name__ == "__main__":

@@ -2,68 +2,59 @@ from datetime import date
 from supply_chain.recommendations import build_recommendation
 from mcp.server.fastmcp import FastMCP
 from supply_chain.recommendations import build_recommendation, calculate_risk_level
-## Old command to import data from CSV - from supply_chain.data_loader import load_shipments
+
+# PHASE 7 CHANGE: switched from CSV loader to SQLite database loader
+# The old line was: from supply_chain.data_loader import load_shipments
+# load_shipments_db reads from supply_chain.db instead of a CSV file
+# We give it the alias "load_shipments" so all the tool code below
+# does not need to change — it still just calls load_shipments(DB_FILE)
 from supply_chain.db_loader import load_shipments_db as load_shipments
+
 from supply_chain.rules import (
     calculate_delay_days,
     assign_delay_status,
     assign_reason_code,
 )
 
+# SECURITY FIX (Phase 10 Step 6d):
+# sanitise_input  — validates string inputs from Claude before we use them
+#                   prevents injection attacks through tool parameters
+# shield_rows     — scans a LIST of result dicts before returning to Claude
+#                   replaces any suspicious text in data fields with [REDACTED]
+# shield_row      — same as shield_rows but for a SINGLE dict (not a list)
+from supply_chain.input_validation import sanitise_input
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
 
-mcp = FastMCP("shipping-delay-agent")
-
-# old command to import from csv folder 
-#DATA_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\shipments_sample.csv"
-# Below is the new one added to import from sqllite db
-##DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# PHASE 10 CHANGE: replaced relative sys.path with absolute path
-# The old line used os.path.join with relative parts which could fail
-# when Claude Desktop launches the server from an unknown working directory.
-# os.path.abspath(__file__) always gives the true location of this file
-# regardless of where Python was launched from.
+# PHASE 10 CHANGE: sys.path fix
+# os.path.abspath(__file__) finds the true location of THIS file on disk
+# os.path.dirname(...) called twice walks up two folders to the project root
+# sys.path.insert(0, ...) adds that folder to Python's search path
+# This ensures imports work correctly no matter where Claude Desktop
+# launches the server from — without this, imports sometimes fail
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# PHASE 10 CHANGE: Central Settings
+# Instead of a hardcoded path like:
+#   DB_FILE = r"C:\Users\preet\...\supply_chain.db"
+# We now call get_database_path() which reads the path from settings.yaml
+# Benefit: if the database ever moves, change ONE line in settings.yaml
+# and every single server updates automatically
 from config.settings_loader import get_database_path
 DB_FILE = get_database_path()
 
 # Always use today's real date — never hardcode this
+# date.today() asks the OS for today's date at the moment the server starts
 TODAY = date.today()
 
+mcp = FastMCP("shipping-delay-agent")
 
-# ─── EXISTING TOOL 1 ────────────────────────────────────────────────────────
+
+# ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST → shield_rows applied on the return line
 
 @mcp.tool()
 def get_delayed_shipments() -> list:
@@ -84,9 +75,6 @@ def get_delayed_shipments() -> list:
     - "Which shipments are overdue?"
     - "List all delayed orders"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
     rows = load_shipments(DB_FILE)
     results = []
 
@@ -103,10 +91,18 @@ def get_delayed_shipments() -> list:
                 "reason_code": assign_reason_code(row, TODAY),
             })
 
-    return results
+    # SECURITY FIX: shield_rows scans every field in every result dict
+    # If any field contains injection-like text (e.g. a customer_name field
+    # saying "Ignore all instructions"), it gets replaced with [REDACTED]
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
-# ─── EXISTING TOOL 2 ────────────────────────────────────────────────────────
+# ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict of COUNTS ONLY (all integers and known string constants)
+#   - Integers cannot contain injection text → no shield needed here
 
 @mcp.tool()
 def get_delay_summary() -> dict:
@@ -128,9 +124,6 @@ def get_delay_summary() -> dict:
     - "How many orders need action?"
     - "What are the most common delay reasons?"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
     rows = load_shipments(DB_FILE)
 
     total_orders = len(rows)
@@ -158,6 +151,8 @@ def get_delay_summary() -> dict:
 
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
+    # No shield needed — all values here are integers or reason code
+    # constants that come from our own rules engine, not raw database text
     return {
         "total_orders": total_orders,
         "on_time": on_time_count,
@@ -169,7 +164,10 @@ def get_delay_summary() -> dict:
     }
 
 
-# ─── EXISTING TOOL 3 ────────────────────────────────────────────────────────
+# ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - Has input parameter (sales_order_no) → sanitise_input added at TOP
+#   - Returns a SINGLE DICT with text fields → shield_row applied on return
 
 @mcp.tool()
 def get_shipment_by_order(sales_order_no: str) -> dict:
@@ -194,16 +192,29 @@ def get_shipment_by_order(sales_order_no: str) -> dict:
     - "Tell me about sales order SO-1015"
     - "Is order SO-1003 delayed?"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
+    # SECURITY FIX: validate the order number BEFORE loading any data
+    # sanitise_input checks:
+    #   - not empty or whitespace-only
+    #   - not longer than 20 characters (real order numbers are ~7 chars)
+    #   - no dangerous characters like ' " ; < > ` ( ) | & $
+    # If any check fails, "error" will be in the returned dict
+    # and we return immediately — load_shipments never runs
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
     rows = load_shipments(DB_FILE)
 
     for row in rows:
         if row.get("sales_order_no", "") == sales_order_no:
             status = assign_delay_status(row, TODAY)
 
-            return {
+            # SECURITY FIX: shield_row wraps the result dict
+            # customer_name and other text fields come from the database
+            # and could theoretically contain injection text
+            # shield_row replaces any suspicious field with [REDACTED]
+            # REPLACES the old direct return statement
+            return shield_row({
                 "sales_order_no": row.get("sales_order_no", ""),
                 "customer_name": row.get("customer_name", ""),
                 "scheduled_pick_date": row.get("scheduled_pick_date", ""),
@@ -212,14 +223,15 @@ def get_shipment_by_order(sales_order_no: str) -> dict:
                 "delay_days": calculate_delay_days(row, TODAY),
                 "delay_status": status,
                 "reason_code": assign_reason_code(row, TODAY),
-            }
+            })
 
     return {"error": f"Sales order {sales_order_no} was not found."}
 
 
-# ─── NEW TOOL 4 ─────────────────────────────────────────────────────────────
-# Only returns NEED_ACTION orders (more than 5 days delayed).
-# Sorted by delay_days descending so the worst offenders appear first.
+# ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST → shield_rows applied on the return line
 
 @mcp.tool()
 def get_need_action_shipments() -> list:
@@ -242,9 +254,6 @@ def get_need_action_shipments() -> list:
     - "Show me the worst delays"
     - "What orders need action right now?"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
     rows = load_shipments(DB_FILE)
     results = []
 
@@ -264,12 +273,17 @@ def get_need_action_shipments() -> list:
     # Sort worst delays first so the most urgent appear at the top
     results.sort(key=lambda x: x["delay_days"], reverse=True)
 
-    return results
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
-# ─── NEW TOOL 5 ─────────────────────────────────────────────────────────────
-# Filters all shipments by a specific reason code.
-# Useful for investigating one root cause across all orders.
+# ─── TOOL 5 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - Has input parameter (reason_code) → sanitise_input added at TOP
+#   - reason_code is in ALLOWED_VALUES in input_validation.py, so only
+#     the 8 known reason codes will pass — everything else is rejected
+#   - Returns a LIST → shield_rows applied on the return line
 
 @mcp.tool()
 def get_shipments_by_reason_code(reason_code: str) -> list:
@@ -299,9 +313,14 @@ def get_shipments_by_reason_code(reason_code: str) -> list:
     - "List all inventory shortage orders"
     - "What orders are unknown and need review?"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
+    # SECURITY FIX: validate reason_code input
+    # field_name="reason_code" triggers the ALLOWED_VALUES check in
+    # input_validation.py — only the 8 known reason codes pass
+    # Return is wrapped in a list [] because this tool always returns a list
+    check = sanitise_input(reason_code, field_name="reason_code", max_length=30)
+    if "error" in check:
+        return [check]
+
     rows = load_shipments(DB_FILE)
     results = []
 
@@ -325,12 +344,19 @@ def get_shipments_by_reason_code(reason_code: str) -> list:
     if not results:
         return [{"message": f"No shipments found with reason code: {normalized_input}"}]
 
-    return results
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
-# ─── NEW TOOL 6 ─────────────────────────────────────────────────────────────
-# Filters all shipments by customer name (partial match, case-insensitive).
-# This lets users ask about a customer without knowing the exact name format.
+# ─── TOOL 6 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - Has input parameter (customer_name) → sanitise_input added at TOP
+#   - customer_name is NOT in ALLOWED_VALUES — any name is valid
+#     so we just check length and safe characters
+#   - max_length=100 because real customer names can be longer than order numbers
+#   - Returns a LIST → shield_rows is especially important here because
+#     customer_name is the most likely field to contain injection text
 
 @mcp.tool()
 def get_shipments_by_customer(customer_name: str) -> list:
@@ -354,9 +380,15 @@ def get_shipments_by_customer(customer_name: str) -> list:
     - "Is Pinnacle Foods impacted by any delays?"
     - "Show me everything for customer Acme"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
+    # SECURITY FIX: validate the customer_name input
+    # max_length=100 — real customer names can be long like "Blue Ridge Supply Co."
+    # allow_spaces=True (default) — names like "Acme Corp" contain spaces
+    # customer_name is NOT in ALLOWED_VALUES so any name passes the value check
+    # Return is wrapped in a list [] because this tool always returns a list
+    check = sanitise_input(customer_name, field_name="customer_name", max_length=100)
+    if "error" in check:
+        return [check]
+
     rows = load_shipments(DB_FILE)
     results = []
 
@@ -380,12 +412,18 @@ def get_shipments_by_customer(customer_name: str) -> list:
     if not results:
         return [{"message": f"No shipments found for customer: {customer_name}"}]
 
-    return results
+    # SECURITY FIX: shield_rows is especially important here
+    # customer_name is raw text from your database — the most likely
+    # field an attacker would try to put injection text into
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
-# ─── NEW TOOL 7 ─────────────────────────────────────────────────────────────
-# Filters all shipments by a specific delay status.
-# Covers all 5 statuses: ON_TIME, DELAYED, NEED_ACTION, SHIPPED, CANCELLED
+# ─── TOOL 7 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - Has input parameter (delay_status) → sanitise_input added at TOP
+#   - delay_status IS in ALLOWED_VALUES — only 5 valid statuses pass
+#   - Returns a LIST → shield_rows applied on the return line
 
 @mcp.tool()
 def get_shipments_by_delay_status(delay_status: str) -> list:
@@ -412,9 +450,14 @@ def get_shipments_by_delay_status(delay_status: str) -> list:
     - "Which orders have been ship confirmed?"
     - "Give me all orders that are on time"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
+    # SECURITY FIX: validate delay_status input
+    # field_name="delay_status" triggers the ALLOWED_VALUES check —
+    # only ON_TIME, DELAYED, NEED_ACTION, SHIPPED, CANCELLED pass
+    # Return wrapped in [] because this tool always returns a list
+    check = sanitise_input(delay_status, field_name="delay_status", max_length=20)
+    if "error" in check:
+        return [check]
+
     rows = load_shipments(DB_FILE)
     results = []
 
@@ -444,11 +487,15 @@ def get_shipments_by_delay_status(delay_status: str) -> list:
     if not results:
         return [{"message": f"No shipments found with status: {normalized_status}"}]
 
-    return results
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
-# ─── NEW TOOL 8 ─────────────────────────────────────────────────────────────
-# The first tool that recommends action, not just reports data.
-# Combines order lookup + delay rules + recommendation logic.
+
+# ─── TOOL 8 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - Has input parameter (sales_order_no) → sanitise_input added at TOP
+#   - Returns a SINGLE DICT with text fields → shield_row applied on return
 
 @mcp.tool()
 def recommend_action_for_order(sales_order_no: str) -> dict:
@@ -474,9 +521,12 @@ def recommend_action_for_order(sales_order_no: str) -> dict:
     - "Give me a recommendation for this order"
     - "What action should I take on the most delayed order?"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
+    # SECURITY FIX: same validation as get_shipment_by_order
+    # max_length=20, safe characters only, not empty
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
     rows = load_shipments(DB_FILE)
 
     for row in rows:
@@ -485,11 +535,14 @@ def recommend_action_for_order(sales_order_no: str) -> dict:
             delay_days = calculate_delay_days(row, TODAY)
             reason = assign_reason_code(row, TODAY)
 
-            # Build the recommendation using our rules engine
             recommendation = build_recommendation(reason, status, delay_days)
 
-            # Return order facts + recommendation together
-            return {
+            # SECURITY FIX: shield_row wraps the full result dict
+            # recommended_action and customer_impact are text strings
+            # customer_name is raw database text
+            # All of these pass through shield_row before Claude sees them
+            # REPLACES the old direct return statement
+            return shield_row({
                 "sales_order_no": row.get("sales_order_no", ""),
                 "customer_name": row.get("customer_name", ""),
                 "scheduled_pick_date": row.get("scheduled_pick_date", ""),
@@ -500,13 +553,17 @@ def recommend_action_for_order(sales_order_no: str) -> dict:
                 "recommended_action": recommendation["recommended_action"],
                 "escalation_note": recommendation["escalation_note"],
                 "customer_impact": recommendation["customer_impact"],
-            }
+            })
 
     return {"error": f"Sales order {sales_order_no} was not found."}
 
-    # ─── NEW TOOL 9 ─────────────────────────────────────────────────────────────
-# Executive-level daily briefing tool.
-# Combines everything into one structured summary a manager can act on.
+
+# ─── TOOL 9 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES FOR THIS TOOL:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a SINGLE DICT — most values are integers and constants
+#   - most_urgent contains customer_name from the database → shield_row
+#     added as a precaution on the final return
 
 @mcp.tool()
 def get_management_summary() -> dict:
@@ -536,9 +593,6 @@ def get_management_summary() -> dict:
     - "What should I know before my 9am standup?"
     - "Executive summary of shipment delays"
     """
-    ## This is commented to migrate from SQL to DB 
-    #rows = load_shipments(DATA_FILE)
-    #new change is below to get the file from Database
     rows = load_shipments(DB_FILE)
 
     # ── Step 1: Count every status ──────────────────────────────────────────
@@ -557,15 +611,12 @@ def get_management_summary() -> dict:
         status = assign_delay_status(row, TODAY)
         reason = assign_reason_code(row, TODAY)
 
-        # Count statuses
         if status in status_counts:
             status_counts[status] += 1
 
-        # Count reason codes (only for delayed orders — not shipped/cancelled)
         if status in ["DELAYED", "NEED_ACTION"]:
             reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
-        # Collect NEED_ACTION orders for finding the most urgent one
         if status == "NEED_ACTION":
             need_action_orders.append({
                 "sales_order_no": row.get("sales_order_no", ""),
@@ -599,7 +650,6 @@ def get_management_summary() -> dict:
     most_urgent_recommendation = None
 
     if need_action_orders:
-        # Sort by delay days descending — worst first
         need_action_orders.sort(key=lambda x: x["delay_days"], reverse=True)
         most_urgent = need_action_orders[0]
 
@@ -638,7 +688,11 @@ def get_management_summary() -> dict:
         )
 
     # ── Step 6: Return the full summary ─────────────────────────────────────
-    return {
+    # SECURITY FIX: shield_row added as a precaution
+    # most_urgent contains customer_name which is raw database text
+    # shield_row ensures that field is clean before Claude reads it
+    # REPLACES the old direct return statement
+    return shield_row({
         "date": str(TODAY),
         "risk_level": risk_level,
         "total_orders": total_orders,
@@ -647,6 +701,8 @@ def get_management_summary() -> dict:
         "most_urgent_order": most_urgent,
         "most_urgent_recommendation": most_urgent_recommendation,
         "briefing": briefing,
-    }
+    })
+
+
 if __name__ == "__main__":
     mcp.run()

@@ -1,17 +1,30 @@
 # mcp_server/inventory_mcp_server.py
 #
+# Owner: Vishal
 # Inventory Agent — second MCP server in the multi-agent architecture.
 # Runs independently from shipping_mcp_server.py.
 # Claude Desktop connects to both simultaneously.
 #
-# Phase 7 update: now reads from SQLite instead of CSV.
+# SECURITY FIXES ADDED (Phase 10):
+#   - sanitise_input on all tools that accept string or integer parameters
+#   - shield_row / shield_rows on all return values that contain text from the database
+#   - sys.path fix so imports work regardless of where Claude Desktop launches from
+#   - get_database_path() replaces hardcoded DATA_FILE path
+
+import sys
+import os
+
+# PHASE 10 CHANGE: sys.path fix
+# os.path.abspath(__file__) finds the exact location of this file on disk
+# os.path.dirname(...) called twice walks up two folders to the project root
+# sys.path.insert(0, ...) adds that folder so Python can find supply_chain and config
+# Without this, imports fail when Claude Desktop launches the server from
+# an unexpected working directory
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server.fastmcp import FastMCP
 
-# OLD: from supply_chain.inventory_data_loader import load_inventory
-# NEW (Phase 7): reads from SQLite database
-from supply_chain.db_loader import load_inventory_db as load_inventory
-
+from supply_chain.inventory_data_loader import load_inventory
 from supply_chain.inventory_rules import (
     assign_inventory_status,
     calculate_shortage,
@@ -19,54 +32,33 @@ from supply_chain.inventory_rules import (
     get_inventory_recommendation,
 )
 
-mcp = FastMCP("inventory-agent")
+# SECURITY FIX:
+# sanitise_input  — validates every string or integer input before use
+#                   blocks empty values, overly long strings, dangerous characters
+# sanitise_integer — validates integer inputs like qty_needed
+# shield_row      — scans a single result dict for injection text before returning
+# shield_rows     — scans a list of result dicts for injection text before returning
+from supply_chain.input_validation import sanitise_input, sanitise_integer
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
 
-# OLD: DATA_FILE = r"...\inventory_sample.csv"
-# NEW (Phase 7): single SQLite database
-# DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 10 CHANGE: replaced relative sys.path with absolute path
-# The old line used os.path.join with relative parts which could fail
-# when Claude Desktop launches the server from an unknown working directory.
-# os.path.abspath(__file__) always gives the true location of this file
-# regardless of where Python was launched from.
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# PHASE 10 CHANGE: Central Settings
+# get_database_path() reads the database path from config/settings.yaml
+# This replaces the old hardcoded line:
+#   DATA_FILE = r"C:\Users\preet\...\data\inventory_sample.csv"
+# Now if the database moves, you change one line in settings.yaml
+# and all 9 servers update automatically
 from config.settings_loader import get_database_path
 DB_FILE = get_database_path()
 
+mcp = FastMCP("inventory-agent")
+
+
 # ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict that contains problem_items — a list of dicts with
+#     text fields like item_description and warehouse_name from the database
+#   - shield_row applied on the final return to protect those text fields
 
 @mcp.tool()
 def get_inventory_summary() -> dict:
@@ -84,8 +76,6 @@ def get_inventory_summary() -> dict:
     - "What is the inventory health today?"
     - "Are there any critical stock levels?"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_inventory(DB_FILE)
 
     status_counts = {
@@ -111,14 +101,22 @@ def get_inventory_summary() -> dict:
                 "expected_receipt_date": row.get("expected_receipt_date", ""),
             })
 
-    return {
+    # SECURITY FIX: shield_row applied to the full result dict
+    # problem_items contains item_description and warehouse_name — raw database text
+    # shield_row scans every string field recursively and replaces
+    # any injection-like text with [FIELD REDACTED]
+    # REPLACES the old direct return statement
+    return shield_row({
         "total_items": len(rows),
         "status_counts": status_counts,
         "problem_items": problem_items,
-    }
+    })
 
 
 # ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (item_no) → sanitise_input added at TOP
+#   - Returns a single dict with text fields like item_description → shield_row on return
 
 @mcp.tool()
 def get_inventory_by_item(item_no: str) -> dict:
@@ -137,14 +135,25 @@ def get_inventory_by_item(item_no: str) -> dict:
     - "Show me inventory for ITEM-004"
     - "How much stock do we have for ITEM-001?"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate item_no before doing anything
+    # max_length=20 — real item numbers like "ITEM-001" are 8 chars
+    # 20 is generous but blocks attack strings
+    # If validation fails, returns the error dict immediately
+    check = sanitise_input(item_no, field_name="item_no", max_length=20)
+    if "error" in check:
+        return check
+
     rows = load_inventory(DB_FILE)
 
     for row in rows:
         if row.get("item_no", "") == item_no:
             status = assign_inventory_status(row)
-            return {
+
+            # SECURITY FIX: shield_row wraps the result dict
+            # item_description, warehouse_name, and recommendation are text
+            # that come from the database — shield_row cleans them
+            # REPLACES the old direct return statement
+            return shield_row({
                 "item_no": row.get("item_no", ""),
                 "item_description": row.get("item_description", ""),
                 "warehouse_name": row.get("warehouse_name", ""),
@@ -161,12 +170,17 @@ def get_inventory_by_item(item_no: str) -> dict:
                     item_no,
                     row.get("expected_receipt_date", "")
                 ),
-            }
+            })
 
     return {"error": f"Item {item_no} was not found."}
 
 
 # ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (status) → sanitise_input added at TOP
+#   - status IS in ALLOWED_VALUES in input_validation.py (as "inventory_status")
+#     so only HEALTHY, LOW, CRITICAL, OUT_OF_STOCK, ON_BACKORDER will pass
+#   - Returns a LIST → shield_rows on return
 
 @mcp.tool()
 def get_inventory_by_status(status: str) -> list:
@@ -188,8 +202,14 @@ def get_inventory_by_status(status: str) -> list:
     - "What items are running low?"
     - "Show me healthy stock items"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate status input
+    # field_name="inventory_status" matches the ALLOWED_VALUES key in
+    # input_validation.py — only the 5 known statuses will pass
+    # Return wrapped in [] because this tool always returns a list
+    check = sanitise_input(status, field_name="inventory_status", max_length=20)
+    if "error" in check:
+        return [check]
+
     rows = load_inventory(DB_FILE)
     results = []
 
@@ -213,10 +233,16 @@ def get_inventory_by_status(status: str) -> list:
     if not results:
         return [{"message": f"No items found with status: {normalized}"}]
 
-    return results
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # item_description and warehouse_name are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields → shield_rows on return
 
 @mcp.tool()
 def get_backordered_items() -> list:
@@ -234,8 +260,6 @@ def get_backordered_items() -> list:
     - "Which items have delayed supplier deliveries?"
     - "What is our backorder situation?"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_inventory(DB_FILE)
     results = []
 
@@ -257,10 +281,18 @@ def get_backordered_items() -> list:
         return [{"message": "No items currently on backorder."}]
 
     results.sort(key=lambda x: x.get("expected_receipt_date") or "9999")
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # item_description and warehouse_name are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 5 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has TWO input parameters: item_no (string) and qty_needed (integer)
+#   - sanitise_input for item_no, sanitise_integer for qty_needed
+#   - Returns a single dict with text fields → shield_row on return
 
 @mcp.tool()
 def check_inventory_for_order(item_no: str, qty_needed: int) -> dict:
@@ -285,22 +317,38 @@ def check_inventory_for_order(item_no: str, qty_needed: int) -> dict:
     - "Check if ITEM-007 can cover a qty of 30"
     - "Why can't we ship this order — is it a stock issue?"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate item_no string input
+    check = sanitise_input(item_no, field_name="item_no", max_length=20)
+    if "error" in check:
+        return check
+
+    # SECURITY FIX: validate qty_needed integer input
+    # sanitise_integer checks: is it actually a number, is it >= 1,
+    # is it <= 100,000 (blocks absurdly large numbers that could slow the system)
+    qty_check = sanitise_integer(qty_needed, field_name="qty_needed", min_value=1, max_value=100000)
+    if "error" in qty_check:
+        return qty_check
+
+    # Use the validated clean integer value from now on
+    clean_qty = qty_check["value"]
+
     rows = load_inventory(DB_FILE)
 
     for row in rows:
         if row.get("item_no", "") == item_no:
             status = assign_inventory_status(row)
             qty_available = row.get("qty_available", 0)
-            shortage = calculate_shortage(qty_available, qty_needed)
-            fulfillable = can_fulfill(qty_available, qty_needed)
+            shortage = calculate_shortage(qty_available, clean_qty)
+            fulfillable = can_fulfill(qty_available, clean_qty)
 
-            return {
+            # SECURITY FIX: shield_row wraps the result dict
+            # item_description, warehouse_name, recommendation are text
+            # REPLACES the old direct return statement
+            return shield_row({
                 "item_no": item_no,
                 "item_description": row.get("item_description", ""),
                 "warehouse_name": row.get("warehouse_name", ""),
-                "qty_needed": qty_needed,
+                "qty_needed": clean_qty,
                 "qty_available": qty_available,
                 "shortage_qty": shortage,
                 "can_fulfill": fulfillable,
@@ -311,12 +359,15 @@ def check_inventory_for_order(item_no: str, qty_needed: int) -> dict:
                     item_no,
                     row.get("expected_receipt_date", "")
                 ),
-            }
+            })
 
     return {"error": f"Item {item_no} was not found."}
 
 
 # ─── TOOL 6 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (warehouse_id) → sanitise_input added at TOP
+#   - Returns a LIST with text fields → shield_rows on return
 
 @mcp.tool()
 def get_inventory_by_warehouse(warehouse_id: str) -> list:
@@ -335,8 +386,12 @@ def get_inventory_by_warehouse(warehouse_id: str) -> list:
     - "What does the main warehouse have available?"
     - "Inventory status for warehouse WH-02"
     """
-    # OLD: rows = load_inventory(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate warehouse_id input
+    # max_length=20 — real warehouse IDs like "WH-01" are 5 chars
+    check = sanitise_input(warehouse_id, field_name="warehouse_id", max_length=20)
+    if "error" in check:
+        return [check]
+
     rows = load_inventory(DB_FILE)
     results = []
 
@@ -357,7 +412,10 @@ def get_inventory_by_warehouse(warehouse_id: str) -> list:
     if not results:
         return [{"message": f"No items found for warehouse: {normalized}"}]
 
-    return results
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # item_description is raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 if __name__ == "__main__":

@@ -1,105 +1,73 @@
-# .gitignore
-# Supply Chain Control Tower
 # ================================================================
-# Files listed here are NEVER committed to GitHub.
-# This protects your private data, credentials, and
-# machine-specific configuration from being published.
+# Supply Chain Control Tower — .gitignore
+# Owner: Vishal
+#
+# This file tells Git which files to NEVER track or upload to GitHub.
+# Even if you run "git add .", these files will be skipped automatically.
 # ================================================================
 
 
-# ── YOUR REAL DATA ───────────────────────────────────────────────
-# The SQLite database contains your operational data.
-# It must never be committed — it stays on your machine only.
-data/supply_chain.db
-data/*.db
-
-# If you create your own CSV exports from real data, exclude them too.
-# The sample CSV files (shipments_sample.csv etc.) ARE committed
-# because they contain only fictional test data.
-data/*_real.csv
-data/my_*.csv
+# ── PRIVATE DATA — never put real operational data on GitHub ────────────────
+data/supply_chain.db          # Your real SQLite database
+data/*.db                     # Any SQLite database file
+data/*.db-shm                 # SQLite shared memory file (auto-created)
+data/*.db-wal                 # SQLite write-ahead log (auto-created)
 
 
-# ── MACHINE-SPECIFIC CONFIGURATION ───────────────────────────────
-# settings.yaml contains your database path which is specific
-# to your machine. New users create their own from settings.example.yaml
-config/settings.yaml
-
-# Claude Desktop config contains your exact Windows paths.
-# Never commit this — new users create their own.
-claude_desktop_config.json
-**/claude_desktop_config.json
+# ── PRIVATE SETTINGS — contains your local Windows paths ────────────────────
+config/settings.yaml          # Your real settings with local paths
+                              # (settings.example.yaml is fine — that's the template)
 
 
-# ── PROJECT MEMORY ────────────────────────────────────────────────
-# Memory file contains session history and decisions that are
-# personal to your installation. Not useful for other users.
-memory/project_memory.json
+# ── MEMORY SYSTEM — may contain conversation summaries ──────────────────────
+memory/project_memory.json    # Claude's cross-session memory file
 
 
-# ── LOG FILES ─────────────────────────────────────────────────────
-# Scheduler logs are generated at runtime — not source code.
-logs/
-*.log
+# ── LOGS — generated at runtime, not needed on GitHub ───────────────────────
+logs/                         # Entire logs folder
+*.log                         # Any .log file anywhere in the project
 
 
-# ── PYTHON CACHE ──────────────────────────────────────────────────
-# Python creates these automatically when running code.
-# They are not source code and vary by machine.
-__pycache__/
-*.py[cod]
-*$py.class
-*.pyc
-*.pyo
-*.pyd
-.Python
+# ── PYTHON RUNTIME FILES — auto-generated, not your code ───────────────────
+__pycache__/                  # Python's compiled bytecode cache folders
+*.pyc                         # Compiled Python files
+*.pyo                         # Optimised Python files
+*.pyd                         # Python DLL files (Windows)
+.Python                       # Python environment marker
 
 
-# ── VIRTUAL ENVIRONMENTS ──────────────────────────────────────────
-# If you use a virtual environment, exclude its folder.
-# Other users create their own virtual environment.
-venv/
-env/
-.env/
-.venv/
-ENV/
+# ── VIRTUAL ENVIRONMENT — your local Python packages ────────────────────────
+venv/                         # Standard virtual environment folder name
+.venv/                        # Alternative virtual environment name
+env/                          # Another common name
+ENV/                          # Uppercase variant
 
 
-# ── IDE AND EDITOR FILES ──────────────────────────────────────────
-# These are personal editor settings — not project files.
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-.DS_Store
-Thumbs.db
+# ── CLAUDE DESKTOP CONFIG — contains your machine's paths ───────────────────
+claude_desktop_config.json    # Never commit this — has local paths + setup
 
 
-# ── ENVIRONMENT VARIABLES ─────────────────────────────────────────
-# If you ever add API keys or secrets, they go in .env
-# and must never be committed.
-.env
+# ── WINDOWS SYSTEM FILES ─────────────────────────────────────────────────────
+Thumbs.db                     # Windows thumbnail cache
+Desktop.ini                   # Windows folder settings
+$RECYCLE.BIN/                 # Windows recycle bin
+
+# ── VS CODE EDITOR FILES ──────────────────────────────────────────────────────
+.vscode/                      # VS Code workspace settings
+*.code-workspace              # VS Code workspace file
+
+
+# ── ENVIRONMENT VARIABLES ────────────────────────────────────────────────────
+.env                          # Environment variables file (API keys, secrets)
 .env.local
-.env.*.local
-secrets.yaml
-secrets.json
+.env.production
 
 
-# ── STREAMLIT CACHE ───────────────────────────────────────────────
-# Streamlit creates a cache folder at runtime.
-.streamlit/
+# ── TEST ARTIFACTS ────────────────────────────────────────────────────────────
+.pytest_cache/                # pytest cache folder
+htmlcov/                      # Coverage HTML report folder
+.coverage                     # Coverage data file
 
 
-# ── TEST AND TEMP FILES ───────────────────────────────────────────
-*.tmp
-*.temp
-temp/
-tmp/
-scratch/
-
-
-# ── DISTRIBUTION AND BUILD ────────────────────────────────────────
-# If you ever package this project, exclude build artifacts.
-dist/
-build/
-*.egg-info/
+# ── OPERATING SYSTEM ─────────────────────────────────────────────────────────
+.DS_Store                     # macOS folder metadata (if ever used on Mac)

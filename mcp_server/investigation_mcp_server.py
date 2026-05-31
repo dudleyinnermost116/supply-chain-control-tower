@@ -1,28 +1,51 @@
 # mcp_server/investigation_mcp_server.py
 #
+# Owner: Vishal
 # Investigation Agent — Phase 5 of the Supply Chain Control Tower.
-# This is the meta-agent — combines signals from all four agents
-# into one unified root cause report.
 #
-# Phase 7 update: now reads from SQLite instead of CSV.
+# This is the meta-agent. It does NOT have its own data file.
+# Instead, it loads data from all four existing tables/CSVs and combines
+# the signals into one unified root cause report.
+#
+# Answers the question:
+#   "Why is this order delayed, and what exactly should I do about it?"
+#
+# Works by calling logic from:
+#   shipping   — delay status and reason code
+#   inventory  — stock availability for the item on the order
+#   freight    — carrier pickup status and hold flags
+#   warehouse  — pick status and operational issues
+#
+# Tools in this server:
+#   investigate_order       — full cross-agent root cause report for one order
+#   find_orders_at_risk     — scans all orders for multi-domain problems
+#   get_root_cause_summary  — aggregate breakdown of root causes across all orders
+#   get_daily_risk_report   — morning briefing combining all four agents
+#
+# SECURITY FIXES ADDED (Phase 10):
+#   - sanitise_input on investigate_order which accepts sales_order_no
+#   - shield_row / shield_rows on all return values containing database text
+#   - sys.path fix so imports work regardless of Claude Desktop launch location
+#   - get_database_path() replaces all four hardcoded file paths
+
+import sys
+import os
+
+# PHASE 10 CHANGE: sys.path fix
+# Ensures Python can find supply_chain and config modules
+# regardless of where Claude Desktop launches the server from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import date
 from mcp.server.fastmcp import FastMCP
 
-# OLD: individual CSV loaders
-# from supply_chain.data_loader import load_shipments
-# from supply_chain.inventory_data_loader import load_inventory
-# from supply_chain.freight_data_loader import load_freight
-# from supply_chain.warehouse_data_loader import load_warehouse_picks
-#
-# NEW (Phase 7): single SQLite database loader
-from supply_chain.db_loader import (
-    load_shipments_db       as load_shipments,
-    load_inventory_db       as load_inventory,
-    load_freight_db         as load_freight,
-    load_warehouse_picks_db as load_warehouse_picks,
-)
+# ── Data loaders ──────────────────────────────────────────────────────────────
+from supply_chain.data_loader import load_shipments
+from supply_chain.inventory_data_loader import load_inventory
+from supply_chain.freight_data_loader import load_freight
+from supply_chain.warehouse_data_loader import load_warehouse_picks
 
+# ── Rules engines ─────────────────────────────────────────────────────────────
 from supply_chain.rules import (
     assign_delay_status,
     assign_reason_code,
@@ -35,63 +58,38 @@ from supply_chain.freight_rules import (
     calculate_pickup_delay_days,
 )
 from supply_chain.warehouse_rules import assign_pick_health
+
+# ── Investigation logic ───────────────────────────────────────────────────────
 from supply_chain.investigation_rules import build_investigation_report
+
+# SECURITY FIX:
+# sanitise_input — validates string inputs before use
+# shield_row     — scans a single result dict for injection text
+# shield_rows    — scans a list of result dicts for injection text
+from supply_chain.input_validation import sanitise_input
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
+
+# PHASE 10 CHANGE: Central Settings
+# get_database_path() reads from config/settings.yaml
+# Replaces all four hardcoded file path lines:
+#   SHIPMENTS_FILE = r"C:\Users\preet\...\shipments_sample.csv"
+#   INVENTORY_FILE = r"C:\Users\preet\...\inventory_sample.csv"
+#   FREIGHT_FILE   = r"C:\Users\preet\...\freight_sample.csv"
+#   WAREHOUSE_FILE = r"C:\Users\preet\...\warehouse_sample.csv"
+# All four agents now read from the same single SQLite database
+from config.settings_loader import get_database_path
+DB_FILE = get_database_path()
 
 mcp = FastMCP("investigation-agent")
 
 TODAY = date.today()
 
-# OLD: four separate CSV file paths
-# SHIPMENTS_FILE = r"...\shipments_sample.csv"
-# INVENTORY_FILE = r"...\inventory_sample.csv"
-# FREIGHT_FILE   = r"...\freight_sample.csv"
-# WAREHOUSE_FILE = r"...\warehouse_sample.csv"
-#
-# NEW (Phase 7): one SQLite database
-# DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-# PHASE 10 CHANGE: replaced relative sys.path with absolute path
-# The old line used os.path.join with relative parts which could fail
-# when Claude Desktop launches the server from an unknown working directory.
-# os.path.abspath(__file__) always gives the true location of this file
-# regardless of where Python was launched from.
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from config.settings_loader import get_database_path
-DB_FILE = get_database_path()
 
 # ─── HELPER: build index dicts for fast lookup ───────────────────────────────
+# Rather than looping through all rows four times per order, we build
+# a dict keyed by the join field once per tool call.
+# Example: inventory_index["ITEM-001"] gives us the inventory row for ITEM-001
+# instantly instead of looping through all inventory rows every time.
 
 def _index_by(rows: list, key: str) -> dict:
     """Returns a dict mapping key -> first matching row."""
@@ -112,20 +110,24 @@ def _gather_signals(ship_row: dict,
     """
     Given one shipment row and three lookup dicts, returns a flat dict
     of all the signals needed to call build_investigation_report.
-    """
-    sales_order_no  = ship_row.get("sales_order_no", "")
-    item_no         = ship_row.get("item_no", "")
 
-    # Shipping signals
+    This helper is called by every tool that loops over all shipments.
+    Centralising the signal-gathering here means if we add a new agent,
+    we only update this one function instead of every tool.
+    """
+    sales_order_no = ship_row.get("sales_order_no", "")
+    item_no        = ship_row.get("item_no", "")
+
+    # ── Shipping signals ──────────────────────────────────────────────────────
     delay_status    = assign_delay_status(ship_row, TODAY)
     delay_days      = calculate_delay_days(ship_row, TODAY)
     shipping_reason = assign_reason_code(ship_row, TODAY)
 
-    # Inventory signals
+    # ── Inventory signals ─────────────────────────────────────────────────────
     inv_row          = inventory_index.get(item_no, {})
     inventory_status = assign_inventory_status(inv_row) if inv_row else "UNKNOWN"
 
-    # Freight signals
+    # ── Freight signals ───────────────────────────────────────────────────────
     frt_row             = freight_index.get(sales_order_no, {})
     freight_status      = assign_freight_status(frt_row, TODAY) if frt_row else "UNKNOWN"
     freight_hold        = str(frt_row.get("freight_hold_flag", "NO")).strip().upper() == "YES"
@@ -135,28 +137,32 @@ def _gather_signals(ship_row: dict,
         frt_row.get("carrier_performance_score", "")
     ) if frt_row else "UNKNOWN"
 
-    # Warehouse signals
+    # ── Warehouse signals ─────────────────────────────────────────────────────
     wh_row      = warehouse_index.get(sales_order_no, {})
     pick_health = assign_pick_health(wh_row, TODAY) if wh_row else "UNKNOWN"
 
     return {
-        "sales_order_no":       sales_order_no,
-        "customer_name":        ship_row.get("customer_name", ""),
-        "scheduled_pick_date":  ship_row.get("scheduled_pick_date", ""),
-        "delay_days":           delay_days,
-        "delay_status":         delay_status,
-        "shipping_reason":      shipping_reason,
-        "inventory_status":     inventory_status,
-        "freight_status":       freight_status,
-        "freight_hold":         freight_hold,
-        "freight_hold_reason":  freight_hold_reason,
-        "pick_health":          pick_health,
-        "carrier_tier":         carrier_tier,
-        "carrier_name":         carrier_name,
+        "sales_order_no":      sales_order_no,
+        "customer_name":       ship_row.get("customer_name", ""),
+        "scheduled_pick_date": ship_row.get("scheduled_pick_date", ""),
+        "delay_days":          delay_days,
+        "delay_status":        delay_status,
+        "shipping_reason":     shipping_reason,
+        "inventory_status":    inventory_status,
+        "freight_status":      freight_status,
+        "freight_hold":        freight_hold,
+        "freight_hold_reason": freight_hold_reason,
+        "pick_health":         pick_health,
+        "carrier_tier":        carrier_tier,
+        "carrier_name":        carrier_name,
     }
 
 
 # ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (sales_order_no) → sanitise_input at TOP
+#   - Returns a single dict — build_investigation_report includes
+#     customer_name, carrier_name, contributing_factors (text) → shield_row on return
 
 @mcp.tool()
 def investigate_order(sales_order_no: str) -> dict:
@@ -183,17 +189,23 @@ def investigate_order(sales_order_no: str) -> dict:
     - "Do a deep dive on order SO-1009"
     - "Investigate the most delayed order"
     """
-    # OLD: load_shipments(SHIPMENTS_FILE), load_inventory(INVENTORY_FILE), etc.
-    # NEW (Phase 7): all from single SQLite database
+    # SECURITY FIX: validate sales_order_no before loading any data
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
+    # Load all four data sources
     ship_rows = load_shipments(DB_FILE)
     inv_rows  = load_inventory(DB_FILE)
     frt_rows  = load_freight(DB_FILE)
     wh_rows   = load_warehouse_picks(DB_FILE)
 
+    # Build lookup dicts for fast cross-agent joining
     inventory_index = _index_by(inv_rows, "item_no")
     freight_index   = _index_by(frt_rows, "sales_order_no")
     warehouse_index = _index_by(wh_rows,  "sales_order_no")
 
+    # Find the shipment row for this order
     ship_row = None
     for row in ship_rows:
         if str(row.get("sales_order_no", "")).strip() == sales_order_no:
@@ -203,9 +215,14 @@ def investigate_order(sales_order_no: str) -> dict:
     if ship_row is None:
         return {"error": f"Sales order {sales_order_no} was not found in shipments data."}
 
+    # Gather all signals from all four agents
     s = _gather_signals(ship_row, inventory_index, freight_index, warehouse_index)
 
-    return build_investigation_report(
+    # SECURITY FIX: shield_row wraps the full investigation report
+    # contributing_factors is a list of plain-English strings built from
+    # database values — customer_name and carrier_name are raw database text
+    # REPLACES the old direct return statement
+    return shield_row(build_investigation_report(
         sales_order_no      = s["sales_order_no"],
         customer_name       = s["customer_name"],
         scheduled_pick_date = s["scheduled_pick_date"],
@@ -219,10 +236,13 @@ def investigate_order(sales_order_no: str) -> dict:
         pick_health         = s["pick_health"],
         carrier_tier        = s["carrier_tier"],
         carrier_name        = s["carrier_name"],
-    )
+    ))
 
 
 # ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with customer_name from the database → shield_rows on return
 
 @mcp.tool()
 def find_orders_at_risk() -> list:
@@ -245,7 +265,6 @@ def find_orders_at_risk() -> list:
     - "Give me a proactive risk scan"
     - "Which delayed orders have the most compounding problems?"
     """
-    # NEW (Phase 7): all from single SQLite database
     ship_rows = load_shipments(DB_FILE)
     inv_rows  = load_inventory(DB_FILE)
     frt_rows  = load_freight(DB_FILE)
@@ -260,9 +279,12 @@ def find_orders_at_risk() -> list:
     for ship_row in ship_rows:
         s = _gather_signals(ship_row, inventory_index, freight_index, warehouse_index)
 
+        # Only assess orders that are not yet shipped or cancelled
         if s["delay_status"] in ("SHIPPED", "CANCELLED"):
             continue
 
+        # Score each domain as a problem (1) or not (0)
+        # The more domains with problems, the higher the risk score
         domain_issues = []
 
         if s["delay_status"] in ("DELAYED", "NEED_ACTION"):
@@ -277,8 +299,10 @@ def find_orders_at_risk() -> list:
         if s["pick_health"] in ("DELAYED", "AT_RISK"):
             domain_issues.append("WAREHOUSE_PROBLEM")
 
+        # Risk score = number of domains with problems
         risk_score = len(domain_issues)
 
+        # Only include orders with at least one domain problem
         if risk_score == 0:
             continue
 
@@ -298,11 +322,20 @@ def find_orders_at_risk() -> list:
     if not results:
         return [{"message": "No orders with multi-domain risk found. All orders look stable."}]
 
+    # Sort: most problem domains first, then most delayed
     results.sort(key=lambda x: (-x["risk_score"], -x["delay_days"]))
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # customer_name is raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict of counts and breakdown lists — all controlled constants
+#     and integers — no raw database text in the output → no shield needed
 
 @mcp.tool()
 def get_root_cause_summary() -> dict:
@@ -325,7 +358,6 @@ def get_root_cause_summary() -> dict:
     - "Summarise why everything is delayed"
     - "Which root cause is hurting us most today?"
     """
-    # NEW (Phase 7): all from single SQLite database
     ship_rows = load_shipments(DB_FILE)
     inv_rows  = load_inventory(DB_FILE)
     frt_rows  = load_freight(DB_FILE)
@@ -343,6 +375,7 @@ def get_root_cause_summary() -> dict:
     for ship_row in ship_rows:
         s = _gather_signals(ship_row, inventory_index, freight_index, warehouse_index)
 
+        # Skip shipped and cancelled
         if s["delay_status"] in ("SHIPPED", "CANCELLED"):
             continue
 
@@ -370,17 +403,21 @@ def get_root_cause_summary() -> dict:
         cause    = report["root_cause"]
         severity = report["severity"]
 
-        root_cause_counts[cause]    = root_cause_counts.get(cause, 0) + 1
-        severity_counts[severity]   = severity_counts.get(severity, 0) + 1
+        root_cause_counts[cause] = root_cause_counts.get(cause, 0) + 1
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
 
     top_cause = max(root_cause_counts, key=root_cause_counts.get) if root_cause_counts else "NONE"
 
-    sorted_causes = sorted(root_cause_counts.items(), key=lambda x: x[1], reverse=True)
+    sorted_causes = sorted(
+        root_cause_counts.items(), key=lambda x: x[1], reverse=True
+    )
     root_cause_breakdown = [
         {"root_cause": cause, "order_count": count}
         for cause, count in sorted_causes
     ]
 
+    # No shield needed — all values are counts, known constants, or
+    # root_cause strings which are controlled values from our rules engine
     return {
         "total_orders_assessed": total_assessed,
         "total_delayed":         total_delayed,
@@ -391,6 +428,10 @@ def get_root_cause_summary() -> dict:
 
 
 # ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict — briefing string is built from integers and known constants
+#     not raw database text → no shield needed
 
 @mcp.tool()
 def get_daily_risk_report() -> dict:
@@ -418,7 +459,6 @@ def get_daily_risk_report() -> dict:
     - "Give me the full picture"
     - "How is the supply chain performing today?"
     """
-    # NEW (Phase 7): all from single SQLite database
     ship_rows = load_shipments(DB_FILE)
     inv_rows  = load_inventory(DB_FILE)
     frt_rows  = load_freight(DB_FILE)
@@ -428,7 +468,7 @@ def get_daily_risk_report() -> dict:
     freight_index   = _index_by(frt_rows, "sales_order_no")
     warehouse_index = _index_by(wh_rows,  "sales_order_no")
 
-    # Shipment counts
+    # ── Shipment counts ───────────────────────────────────────────────────────
     ship_counts = {
         "total": len(ship_rows),
         "ON_TIME": 0, "DELAYED": 0, "NEED_ACTION": 0,
@@ -438,7 +478,7 @@ def get_daily_risk_report() -> dict:
         status = assign_delay_status(row, TODAY)
         ship_counts[status] = ship_counts.get(status, 0) + 1
 
-    # Inventory counts
+    # ── Inventory counts ──────────────────────────────────────────────────────
     inv_counts = {
         "total": len(inv_rows),
         "HEALTHY": 0, "LOW": 0, "CRITICAL": 0,
@@ -448,7 +488,7 @@ def get_daily_risk_report() -> dict:
         status = assign_inventory_status(row)
         inv_counts[status] = inv_counts.get(status, 0) + 1
 
-    # Freight counts
+    # ── Freight counts ────────────────────────────────────────────────────────
     frt_counts = {
         "total": len(frt_rows),
         "SCHEDULED": 0, "IN_TRANSIT": 0, "DELIVERED": 0,
@@ -458,13 +498,13 @@ def get_daily_risk_report() -> dict:
         status = assign_freight_status(row, TODAY)
         frt_counts[status] = frt_counts.get(status, 0) + 1
 
-    # Warehouse counts
+    # ── Warehouse counts ──────────────────────────────────────────────────────
     wh_counts = {"total": len(wh_rows), "ON_TRACK": 0, "AT_RISK": 0, "DELAYED": 0, "UNKNOWN": 0}
     for row in wh_rows:
         health = assign_pick_health(row, TODAY)
         wh_counts[health] = wh_counts.get(health, 0) + 1
 
-    # Multi-domain risk count
+    # ── Multi-domain risk count ───────────────────────────────────────────────
     multi_domain_count = 0
     root_cause_counts  = {}
 
@@ -511,7 +551,7 @@ def get_daily_risk_report() -> dict:
         if root_cause_counts else "NONE"
     )
 
-    # Plain-English briefing
+    # ── Build plain-English briefing ──────────────────────────────────────────
     delayed_total = ship_counts["DELAYED"] + ship_counts["NEED_ACTION"]
     need_action   = ship_counts["NEED_ACTION"]
     inv_problems  = inv_counts["CRITICAL"] + inv_counts["OUT_OF_STOCK"] + inv_counts["ON_BACKORDER"]
@@ -550,6 +590,8 @@ def get_daily_risk_report() -> dict:
 
     briefing = " ".join(briefing_parts)
 
+    # No shield needed — all values here are counts, dates, and
+    # briefing text built entirely from integers and known constants
     return {
         "date": str(TODAY),
         "briefing": briefing,

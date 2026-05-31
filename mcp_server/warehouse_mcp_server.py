@@ -1,17 +1,35 @@
 # mcp_server/warehouse_mcp_server.py
 #
+# Owner: Vishal
 # Warehouse Agent — Phase 4 of the Supply Chain Control Tower.
 # Tracks pick status, staffing issues, equipment problems, and throughput.
 #
-# Phase 7 update: now reads from SQLite instead of CSV.
+# Answers the question: "Why hasn't this order been picked yet?"
+#
+# Works alongside:
+#   freight_mcp_server.py   — carrier and pickup status
+#   shipping_mcp_server.py  — outbound delay status
+#   inventory_mcp_server.py — stock availability
+#   po_mcp_server.py        — inbound supplier orders
+#
+# SECURITY FIXES ADDED (Phase 10):
+#   - sanitise_input on all tools that accept string parameters
+#   - shield_row / shield_rows on all return values containing database text
+#   - sys.path fix so imports work regardless of Claude Desktop launch location
+#   - get_database_path() replaces hardcoded DATA_FILE path
+
+import sys
+import os
+
+# PHASE 10 CHANGE: sys.path fix
+# Ensures Python can find supply_chain and config modules
+# regardless of where Claude Desktop launches the server from
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import date
 from mcp.server.fastmcp import FastMCP
 
-# OLD: from supply_chain.warehouse_data_loader import load_warehouse_picks
-# NEW (Phase 7): reads from SQLite database
-from supply_chain.db_loader import load_warehouse_picks_db as load_warehouse_picks
-
+from supply_chain.warehouse_data_loader import load_warehouse_picks
 from supply_chain.warehouse_rules import (
     assign_pick_health,
     calculate_pick_delay_days,
@@ -19,57 +37,29 @@ from supply_chain.warehouse_rules import (
     get_warehouse_summary_stats,
 )
 
-mcp = FastMCP("warehouse-agent")
+# SECURITY FIX:
+# sanitise_input — validates string inputs before use
+# shield_row     — scans a single result dict for injection text
+# shield_rows    — scans a list of result dicts for injection text
+from supply_chain.input_validation import sanitise_input
+from supply_chain.prompt_injection_shield import shield_rows, shield_row
 
-# OLD: DATA_FILE = r"...\warehouse_sample.csv"
-# NEW (Phase 7): single SQLite database
-##DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-# ── PHASE 10 CHANGE: Central Settings (Step 2) ───────────────────────────────
-#
-# WHAT WAS HERE BEFORE:
-#   DB_FILE = r"C:\Users\preet\Documents\AI Work\supply_chain_mcp_project\data\supply_chain.db"
-#
-# HISTORY — WHY THIS LINE CHANGED TWICE:
-#   Phase 1–6:  Each server had a hardcoded DATA_FILE pointing to its own CSV.
-#               e.g. DATA_FILE = r"...\data\shipments_sample.csv"
-#
-#   Phase 7:    We migrated from individual CSV files to a single SQLite
-#               database (supply_chain.db). At that point, every server
-#               replaced their DATA_FILE line with a DB_FILE line pointing
-#               to the .db file. Still hardcoded, but now one file instead
-#               of five different CSVs.
-#
-#   Phase 10:   Now we remove the last hardcoded path. get_database_path()
-#               reads the database path from config\settings.yaml instead
-#               of having it typed here. If the .db file ever moves, you
-#               change one line in settings.yaml and all servers update.
-#
-# WHAT get_database_path() DOES:
-#   It reads paths.database from settings.yaml, combines it with paths.base,
-#   and returns the full absolute path to supply_chain.db.
-#   It is defined in config\settings_loader.py which we built in Step 2.
-#
-# HOW TO ROLL BACK (if something breaks):
-#   Comment out the two new lines below and uncomment the original DB_FILE
-#   line above. The server will work exactly as it did before.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# PHASE 10 CHANGE: replaced relative sys.path with absolute path
-# The old line used os.path.join with relative parts which could fail
-# when Claude Desktop launches the server from an unknown working directory.
-# os.path.abspath(__file__) always gives the true location of this file
-# regardless of where Python was launched from.
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# PHASE 10 CHANGE: Central Settings
+# Replaces the old hardcoded line:
+#   DATA_FILE = r"C:\Users\preet\...\data\warehouse_sample.csv"
 from config.settings_loader import get_database_path
 DB_FILE = get_database_path()
+
+mcp = FastMCP("warehouse-agent")
 
 TODAY = date.today()
 
 
 # ─── TOOL 1 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (sales_order_no) → sanitise_input at TOP
+#   - Returns a single dict with text fields like warehouse_name,
+#     pick_delay_reason, assigned_picker, recommendation → shield_row on return
 
 @mcp.tool()
 def get_pick_status_by_order(sales_order_no: str) -> dict:
@@ -89,8 +79,12 @@ def get_pick_status_by_order(sales_order_no: str) -> dict:
     - "Is there a staffing issue holding up SO-1009?"
     - "What is the pick status for SO-1005?"
     """
-    # OLD: rows = load_warehouse_picks(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate sales_order_no before doing anything
+    # max_length=20 — real order numbers like "SO-1003" are 7 chars
+    check = sanitise_input(sales_order_no, field_name="sales_order_no", max_length=20)
+    if "error" in check:
+        return check
+
     rows = load_warehouse_picks(DB_FILE)
 
     for row in rows:
@@ -98,7 +92,11 @@ def get_pick_status_by_order(sales_order_no: str) -> dict:
             health = assign_pick_health(row, TODAY)
             delay_days = calculate_pick_delay_days(row, TODAY)
 
-            return {
+            # SECURITY FIX: shield_row wraps the full result dict
+            # warehouse_name, pick_delay_reason, assigned_picker, zone
+            # are all raw database text — shield_row cleans them
+            # REPLACES the old direct return statement
+            return shield_row({
                 "pick_id": row.get("pick_id", ""),
                 "sales_order_no": row.get("sales_order_no", ""),
                 "warehouse_id": row.get("warehouse_id", ""),
@@ -117,12 +115,16 @@ def get_pick_status_by_order(sales_order_no: str) -> dict:
                 "staffing_flag": row.get("staffing_flag", "NO"),
                 "zone": row.get("zone", ""),
                 "recommendation": get_pick_recommendation(row, TODAY),
-            }
+            })
 
     return {"error": f"No warehouse pick record found for order: {sales_order_no}"}
 
 
 # ─── TOOL 2 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a dict containing problem_picks — a list of dicts with
+#     text fields like warehouse_name, pick_delay_reason → shield_row on return
 
 @mcp.tool()
 def get_warehouse_summary() -> dict:
@@ -140,8 +142,6 @@ def get_warehouse_summary() -> dict:
     - "What is the pick completion rate?"
     - "Are there any warehouse issues I should know about?"
     """
-    # OLD: rows = load_warehouse_picks(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_warehouse_picks(DB_FILE)
     stats = get_warehouse_summary_stats(rows, TODAY)
 
@@ -161,16 +161,23 @@ def get_warehouse_summary() -> dict:
                 "pick_delay_days": calculate_pick_delay_days(row, TODAY),
             })
 
-    return {
+    # SECURITY FIX: shield_row wraps the full result dict
+    # problem_picks contains warehouse_name and pick_delay_reason
+    # which are raw database text fields
+    # REPLACES the old direct return statement
+    return shield_row({
         "total_picks": stats["total_picks"],
         "on_track": stats["ON_TRACK"],
         "at_risk": stats["AT_RISK"],
         "delayed": stats["DELAYED"],
         "problem_picks": problem_picks,
-    }
+    })
 
 
 # ─── TOOL 3 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields → shield_rows on return
 
 @mcp.tool()
 def get_delayed_picks() -> list:
@@ -188,8 +195,6 @@ def get_delayed_picks() -> list:
     - "Show me picks that haven't started on time"
     - "What is causing warehouse pick delays?"
     """
-    # OLD: rows = load_warehouse_picks(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_warehouse_picks(DB_FILE)
     results = []
 
@@ -217,10 +222,17 @@ def get_delayed_picks() -> list:
         return [{"message": "No delayed picks found. All warehouse picks are on track."}]
 
     results.sort(key=lambda x: x["pick_delay_days"], reverse=True)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # warehouse_name, pick_delay_reason are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 4 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - Has input parameter (warehouse_id) → sanitise_input at TOP
+#   - Returns a LIST with text fields → shield_rows on return
 
 @mcp.tool()
 def get_picks_by_warehouse(warehouse_id: str) -> list:
@@ -237,8 +249,12 @@ def get_picks_by_warehouse(warehouse_id: str) -> list:
     - "Are there any issues at WH-01?"
     - "Give me the pick status for warehouse WH-02"
     """
-    # OLD: rows = load_warehouse_picks(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
+    # SECURITY FIX: validate warehouse_id input
+    # max_length=20 — real warehouse IDs like "WH-01" are 5 chars
+    check = sanitise_input(warehouse_id, field_name="warehouse_id", max_length=20)
+    if "error" in check:
+        return [check]
+
     rows = load_warehouse_picks(DB_FILE)
     results = []
 
@@ -264,12 +280,21 @@ def get_picks_by_warehouse(warehouse_id: str) -> list:
     if not results:
         return [{"message": f"No pick records found for warehouse: {normalized}"}]
 
+    # Sort: DELAYED first, then AT_RISK, then ON_TRACK
     health_order = {"DELAYED": 0, "AT_RISK": 1, "ON_TRACK": 2, "UNKNOWN": 3}
     results.sort(key=lambda x: health_order.get(x["pick_health"], 9))
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # pick_delay_reason is raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 # ─── TOOL 5 ─────────────────────────────────────────────────────────────────
+# SECURITY NOTES:
+#   - No input parameter → no sanitise_input needed
+#   - Returns a LIST with text fields like warehouse_name,
+#     pick_delay_reason, recommendation → shield_rows on return
 
 @mcp.tool()
 def get_staffing_and_equipment_issues() -> list:
@@ -287,8 +312,6 @@ def get_staffing_and_equipment_issues() -> list:
     - "Is the warehouse short-staffed today?"
     - "What equipment problems are slowing down picks?"
     """
-    # OLD: rows = load_warehouse_picks(DATA_FILE)
-    # NEW (Phase 7): load from SQLite
     rows = load_warehouse_picks(DB_FILE)
     results = []
 
@@ -315,7 +338,11 @@ def get_staffing_and_equipment_issues() -> list:
         return [{"message": "No staffing or equipment issues currently flagged."}]
 
     results.sort(key=lambda x: x["pick_delay_days"], reverse=True)
-    return results
+
+    # SECURITY FIX: shield_rows scans all result dicts before returning
+    # warehouse_name, pick_delay_reason are raw database text
+    # REPLACES the old line: return results
+    return shield_rows(results)
 
 
 if __name__ == "__main__":
